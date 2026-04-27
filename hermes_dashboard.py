@@ -241,6 +241,7 @@ class SessionsPane(Vertical):
     BINDINGS = [
         Binding("enter", "chat_with_selected", "切换聊天"),
         Binding("n", "new_chat", "新对话"),
+        Binding("ctrl+r", "rename_session", "重命名"),
         Binding("ctrl+y", "yank_last", "复制回复"),
         Binding("ctrl+c", "yank_last", "复制回复", show=False),
     ]
@@ -456,11 +457,7 @@ class SessionsPane(Vertical):
                     self.run_worker(self._delete_session(sid), exclusive=True)
             case "sess-rename-btn":
                 if sid:
-                    inp = self.query_one("#sess-search", Input)
-                    self._rename_target = sid
-                    inp.value = ""
-                    inp.placeholder = "新会话名 (Enter 确认)"
-                    inp.focus()
+                    self._enter_rename_mode(sid)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "sess-chat-input":
@@ -698,6 +695,21 @@ class SessionsPane(Vertical):
 
     def action_new_chat(self):
         self._new_conversation()
+
+    def action_rename_session(self):
+        sid = self._selected_sid()
+        if sid:
+            self._enter_rename_mode(sid)
+
+    def _enter_rename_mode(self, sid: str):
+        inp = self.query_one("#sess-search", Input)
+        self._rename_target = sid
+        inp.value = ""
+        inp.placeholder = f"重命名 {sid[:12]}... (Enter 确认)"
+        inp.focus()
+        s = self.query_one("#sess-chat-status", Static)
+        s.update("[bold yellow]✏️ 在搜索框输入新名称后按 Enter[/bold yellow]")
+        self.set_timer(4, lambda: s.update(""))
 
     def action_yank_last(self):
         if not self._last_response:
