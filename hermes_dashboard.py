@@ -226,9 +226,13 @@ class SessionsPane(Vertical):
             log.write(Markdown(content))
             self._last_response = content
         elif role == "tool":
-            log.write(f"[bold yellow]🛠️ {tool_name or '工具执行'}[/bold yellow]")
-            display_content = content[:1000] + "..." if len(content) > 1000 else content
-            log.write(display_content)
+            name = tool_name or "工具"
+            first_line = content.split("\n")[0].strip()[:120]
+            total = len(content)
+            if total > len(first_line):
+                log.write(f"[dim]┊ [bold yellow]🔧 {name}[/bold yellow] {first_line}... [italic]({total} 字符)[/italic][/dim]")
+            else:
+                log.write(f"[dim]┊ [bold yellow]🔧 {name}[/bold yellow] {first_line}[/dim]")
         log.write("")
     def _start_loading_bar(self):
         if self._loading_bar_timer:
@@ -468,7 +472,9 @@ class SessionsPane(Vertical):
             if len(content) > 3000:
                 content = content[:3000] + f"\n\n[dim italic]... (省略 {len(content) - 3000} 字符，完整内容请用 hermes --resume {sid} 查看)[/dim italic]"
 
-            tool_name = "工具输出" if role == "tool" else None
+            tool_name = None
+            if role == "tool":
+                tool_name = m.get("name") or m.get("tool_name") or "工具"
             self._add_chat_message(role, content, tool_name)
 
     def _send_chat(self):
