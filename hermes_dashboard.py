@@ -26,11 +26,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
     Header, Footer, Static, DataTable, Label, Button, Input,
-    TextArea, TabbedContent, TabPane
+    TextArea, RichLog, TabbedContent, TabPane
 )
 from textual.binding import Binding
 from textual import work, on
 from rich.text import Text
+from rich.markdown import Markdown
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -189,7 +190,7 @@ class SessionsPane(Vertical):
                     Static("", id="sess-chat-loading-bar"),
                     id="sess-chat-status-area"
                 ),
-                TextArea(id="sess-chat-feed", read_only=True, soft_wrap=True),
+                RichLog(id="sess-chat-feed", markup=True, highlight=True, wrap=True),
                 Horizontal(
                     Input(placeholder="输入消息 (Enter 发送)", id="sess-chat-input"),
                     Button("发送", id="sess-chat-send", variant="primary"),
@@ -208,8 +209,8 @@ class SessionsPane(Vertical):
         table.add_columns("", "会话", "时间")
         self.load_sessions()
         
-        log = self.query_one("#sess-chat-feed", TextArea)
-        log.load_text("← 选择左侧会话查看对话历史，或点击'新对话'开始\n")
+        log = self.query_one("#sess-chat-feed", RichLog)
+        log.write("[dim]← 选中左侧会话查看历史，或点击'新对话'开始。[/dim]\n[dim]鼠标拖拽选中文本后 Cmd+C 复制[/dim]")
         
         try:
             self._stop_loading_bar()
@@ -217,19 +218,18 @@ class SessionsPane(Vertical):
             pass
 
     def _add_chat_message(self, role: str, content: str, tool_name: str | None = None):
-        log = self.query_one("#sess-chat-feed", TextArea)
+        log = self.query_one("#sess-chat-feed", RichLog)
         if role == "user":
-            line = f"\n▸ 你: {content}\n"
+            log.write(f"[bold green]▸ 你[/bold green] {content}")
         elif role == "assistant":
-            line = f"\n◂ AI: {content}\n"
+            log.write("[bold cyan]◂ AI[/bold cyan]")
+            log.write(Markdown(content))
             self._last_response = content
         elif role == "tool":
-            display = content[:1000] + "..." if len(content) > 1000 else content
-            line = f"\n🛠️ {tool_name or '工具'}: {display}\n"
-        else:
-            return
-        log.text = log.text + line
-        log.cursor_position = len(log.text)
+            log.write(f"[bold yellow]🛠️ {tool_name or '工具执行'}[/bold yellow]")
+            display_content = content[:1000] + "..." if len(content) > 1000 else content
+            log.write(display_content)
+        log.write("")
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -316,10 +316,7 @@ class SessionsPane(Vertical):
         return None
 
     def _new_conversation(self):
-        log = self.query_one("#sess-chat-feed", TextArea)
-        status = self.query_one("#sess-chat-status", Static)
-        self._stop_loading_bar()
-
+        log = self.query_one("#sess-chat-feed", RichLog)
         log.clear()
         status.update("")
 
@@ -430,36 +427,34 @@ class SessionsPane(Vertical):
     def _load_session_chat(self, sid: str):
         self._is_new_conv = False
         self._active_session_id = sid
-        log = self.query_one("#sess-chat-feed", TextArea)
+        log = self.query_one("#sess-chat-feed", RichLog)
         log.clear()
-        log.load_text("正在加载历史消息...\n")
+        log.write("[dim]正在加载历史消息...[/dim]")
         self.run_worker(self._fetch_session_messages(sid), exclusive=True)
 
     async def _fetch_session_messages(self, sid: str):
-        log = self.query_one("#sess-chat-feed", TextArea)
-        log.text = ""
+        log = self.query_one("#sess-chat-feed", RichLog)
+        log.clear()
 
         raw = shell(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
         if not raw:
-            log.text = "无法获取会话内容"
+            self._add_chat_message("assistant", "[red]无法获取会话内容[/red]")
             return
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            log.text = "解析失败"
+            self._add_chat_message("assistant", "[red]解析失败[/red]")
             return
 
         msgs = data.get("messages", [])
         model = data.get("model", "?")
-        log.text = ""
 
-        header = (
-            f"━━━ 会话: {sid} ━━━\n\n"
-            f"模型: {model} | 消息数: {len(msgs)}\n"
-            f"恢复命令: hermes --resume {sid}\n"
+        log.clear()
+        self._add_chat_message("assistant",
+            f"**━━━ 会话: {sid} ━━━**\n\n"
+            f"[dim]模型: {model} | 消息数: {len(msgs)} | 恢复命令: hermes --resume {sid}[/dim]"
         )
-        self._add_chat_message("assistant", header)
 
         for m in msgs:
             role = m.get("role", "")
@@ -471,7 +466,7 @@ class SessionsPane(Vertical):
                 continue
 
             if len(content) > 3000:
-                content = content[:3000] + f"\n\n... (省略 {len(content) - 3000} 字符，完整内容请用 hermes --resume {sid} 查看)"
+                content = content[:3000] + f"\n\n[dim italic]... (省略 {len(content) - 3000} 字符，完整内容请用 hermes --resume {sid} 查看)[/dim italic]"
 
             tool_name = "工具输出" if role == "tool" else None
             self._add_chat_message(role, content, tool_name)
