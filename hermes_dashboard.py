@@ -26,12 +26,11 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
     Header, Footer, Static, DataTable, Label, Button, Input,
-    TextArea, RichLog, TabbedContent, TabPane, Collapsible
+    TextArea, TabbedContent, TabPane
 )
 from textual.binding import Binding
 from textual import work, on
 from rich.text import Text
-from rich.markdown import Markdown
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -148,91 +147,6 @@ class StatusContent(Static):
 
 
 # ──────────────────────────────────────────────
-# 聊天消息组件 (支持折叠)
-# ──────────────────────────────────────────────
-class ChatMessage(Vertical):
-    """单个消息组件，支持代码折叠和工具调用显示。"""
-    
-    DEFAULT_CSS = """
-    ChatMessage {
-        padding: 1 2;
-        margin-bottom: 1;
-        background: $surface 80%;
-        border-left: inner $primary 80%;
-        color: $text;
-    }
-    ChatMessage Collapsible {
-        width: 100%;
-        margin: 1 0;
-    }
-    """
-
-    def __init__(self, role: str, content: str, tool_name: str | None = None):
-        super().__init__()
-        self.role = role
-        self.content = content
-        self.tool_name = tool_name
-
-    def compose(self) -> ComposeResult:
-        # 1. 角色标签
-        if self.role == "user":
-            yield Static("[bold green]▸ 你[/bold green]")
-        elif self.role == "assistant":
-            yield Static("[bold cyan]◂ AI[/bold cyan]")
-        elif self.role == "tool":
-            yield Static(f"[bold yellow]🛠️ {self.tool_name or '工具执行'}[/bold yellow]")
-        
-        # 2. 内容渲染
-        if not self.content or not self.content.strip():
-            yield Static("[dim](空)[/dim]")
-            return
-
-        if self.role == "tool":
-            # 工具输出默认折叠
-            yield Collapsible(
-                Static(self.content, markup=False),
-                title="👇 点击查看工具输出",
-                collapsed=True
-            )
-        else:
-            # 检查代码块 (```lang ... ```)
-            # 使用 re.DOTALL 匹配多行
-            parts = re.split(r'(```[\w]*\n[\s\S]*?```)', self.content)
-            
-            if len(parts) == 1 and not parts[0].strip().startswith("```"):
-                # 没有代码块，直接渲染 Markdown
-                yield Static(Markdown(self.content))
-            else:
-                has_rendered = False
-                for part in parts:
-                    if not part.strip(): continue
-                    
-                    if part.startswith("```"):
-                        # 代码块
-                        try:
-                            lines = part.split("\n", 1)
-                            lang = lines[0].replace("```", "").strip()
-                            code = lines[1].rsplit("```", 1)[0] if len(lines) > 1 else part
-                            
-                            yield Collapsible(
-                                Static(code, markup=False),
-                                title=f"📝 代码: {lang}" if lang else "📝 代码",
-                                collapsed=True
-                            )
-                            has_rendered = True
-                        except:
-                            yield Static(Markdown(part))
-                            has_rendered = True
-                    else:
-                        # 普通 Markdown
-                        yield Static(Markdown(part))
-                        has_rendered = True
-                
-                if not has_rendered:
-                    yield Static(Markdown(self.content))
-
-
-# ──────────────────────────────────────────────
 # 会话面板（左右分栏）
 # ──────────────────────────────────────────────
 class SessionsPane(Vertical):
@@ -244,11 +158,6 @@ class SessionsPane(Vertical):
         Binding("ctrl+r", "rename_session", "重命名"),
         Binding("ctrl+y", "yank_last", "复制回复"),
         Binding("ctrl+c", "yank_last", "复制回复", show=False),
-        Binding("v", "toggle_select", "选择"),
-        Binding("j", "select_next", show=False),
-        Binding("k", "select_prev", show=False),
-        Binding("y", "yank_selected", show=False),
-        Binding("escape", "exit_select", show=False),
     ]
 
     def __init__(self):
@@ -258,9 +167,6 @@ class SessionsPane(Vertical):
         self._loading_bar_timer = None
         self._last_response = ""
         self._rename_target = None
-        self._messages: list[dict] = []
-        self._select_mode = False
-        self._select_index = 0
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -283,7 +189,7 @@ class SessionsPane(Vertical):
                     Static("", id="sess-chat-loading-bar"),
                     id="sess-chat-status-area"
                 ),
-                RichLog(id="sess-chat-feed", markup=True, highlight=True, wrap=True),
+                TextArea(id="sess-chat-feed", read_only=True, soft_wrap=True),
                 Horizontal(
                     Input(placeholder="输入消息 (Enter 发送)", id="sess-chat-input"),
                     Button("发送", id="sess-chat-send", variant="primary"),
@@ -302,8 +208,8 @@ class SessionsPane(Vertical):
         table.add_columns("", "会话", "时间")
         self.load_sessions()
         
-        log = self.query_one("#sess-chat-feed", RichLog)
-        log.write("[dim]← 选择左侧会话查看对话历史，或点击'新对话'开始[/dim]")
+        log = self.query_one("#sess-chat-feed", TextArea)
+        log.load_text("← 选择左侧会话查看对话历史，或点击'新对话'开始\n")
         
         try:
             self._stop_loading_bar()
@@ -311,19 +217,19 @@ class SessionsPane(Vertical):
             pass
 
     def _add_chat_message(self, role: str, content: str, tool_name: str | None = None):
-        log = self.query_one("#sess-chat-feed", RichLog)
+        log = self.query_one("#sess-chat-feed", TextArea)
         if role == "user":
-            log.write(f"[bold green]▸ 你[/bold green] {content}")
+            line = f"\n▸ 你: {content}\n"
         elif role == "assistant":
-            log.write("[bold cyan]◂ AI[/bold cyan]")
-            log.write(Markdown(content))
+            line = f"\n◂ AI: {content}\n"
             self._last_response = content
         elif role == "tool":
-            log.write(f"[bold yellow]🛠️ {tool_name or '工具执行'}[/bold yellow]")
-            display_content = content[:1000] + "..." if len(content) > 1000 else content
-            log.write(display_content)
-        log.write("")
-        self._messages.append({"role": role, "content": content})
+            display = content[:1000] + "..." if len(content) > 1000 else content
+            line = f"\n🛠️ {tool_name or '工具'}: {display}\n"
+        else:
+            return
+        log.text = log.text + line
+        log.cursor_position = len(log.text)
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -410,24 +316,19 @@ class SessionsPane(Vertical):
         return None
 
     def _new_conversation(self):
-        """开始全新对话（走官方 Hermes Agent 流程）。"""
-        log = self.query_one("#sess-chat-feed", RichLog)
+        log = self.query_one("#sess-chat-feed", TextArea)
         status = self.query_one("#sess-chat-status", Static)
         self._stop_loading_bar()
-        
-        # 清空对话流
+
         log.clear()
-        self._messages.clear()
         status.update("")
-        
-        # 重置新对话状态
+
         self._is_new_conv = True
         self._active_session_id = None
-        
-        # 添加欢迎卡片
-        self._add_chat_message("assistant", 
+
+        self._add_chat_message("assistant",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "**💬 新对话 (Agent 模式)**\n"
+            "💬 新对话 (Agent 模式)\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "输入第一条消息，将启动完整 Agent 流程\n"
             "(加载 Memory、Skills、Tools，自动保存)"
@@ -527,66 +428,52 @@ class SessionsPane(Vertical):
             self._load_session_chat(str(key.value))
 
     def _load_session_chat(self, sid: str):
-        # 切回已有会话时，清空新对话状态
         self._is_new_conv = False
         self._active_session_id = sid
-        log = self.query_one("#sess-chat-feed", RichLog)
+        log = self.query_one("#sess-chat-feed", TextArea)
         log.clear()
-        self._messages.clear()
-        log.write("[dim]正在加载历史消息...[/dim]")
+        log.load_text("正在加载历史消息...\n")
         self.run_worker(self._fetch_session_messages(sid), exclusive=True)
 
     async def _fetch_session_messages(self, sid: str):
-        # 清空现有消息
-        log = self.query_one("#sess-chat-feed", RichLog)
-        log.clear()
-        
-        self._add_chat_message("assistant", "加载中...")
+        log = self.query_one("#sess-chat-feed", TextArea)
+        log.text = ""
 
         raw = shell(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
         if not raw:
-            log.clear()
-            self._add_chat_message("assistant", "[red]无法获取会话内容[/red]")
+            log.text = "无法获取会话内容"
             return
-        
+
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            log.clear()
-            self._add_chat_message("assistant", "[red]解析失败[/red]")
+            log.text = "解析失败"
             return
-        
+
         msgs = data.get("messages", [])
         model = data.get("model", "?")
-        
-        log.clear()
-        # 添加头部
-        self._add_chat_message("assistant", 
-            f"**━━━ 会话: {sid} ━━━**\n\n"
-            f"[dim]模型: {model} | 消息数: {len(msgs)} | 恢复命令: hermes --resume {sid}[/dim]"
+        log.text = ""
+
+        header = (
+            f"━━━ 会话: {sid} ━━━\n\n"
+            f"模型: {model} | 消息数: {len(msgs)}\n"
+            f"恢复命令: hermes --resume {sid}\n"
         )
-        
-        # 遍历消息
+        self._add_chat_message("assistant", header)
+
         for m in msgs:
             role = m.get("role", "")
             content = str(m.get("content", "")).strip()
-            
-            # 过滤空消息
+
             if not content and role != "assistant":
                 continue
             if role == "assistant" and not content and not m.get("tool_calls"):
                 continue
-            
-            # 截断超长消息
+
             if len(content) > 3000:
-                content = content[:3000] + f"\n\n[dim italic]... (省略 {len(content) - 3000} 字符，完整内容请用 hermes --resume {sid} 查看)[/dim italic]"
-            
-            # 特殊处理 Tool 消息
-            tool_name = None
-            if role == "tool":
-                # 尝试从 tool_call_id 匹配名字? 比较复杂，暂且显示通用名字
-                tool_name = "工具输出"
-            
+                content = content[:3000] + f"\n\n... (省略 {len(content) - 3000} 字符，完整内容请用 hermes --resume {sid} 查看)"
+
+            tool_name = "工具输出" if role == "tool" else None
             self._add_chat_message(role, content, tool_name)
 
     def _send_chat(self):
@@ -734,71 +621,6 @@ class SessionsPane(Vertical):
             self.set_timer(2, lambda: status.update(""))
         except Exception:
             pass
-
-    def action_toggle_select(self):
-        self._select_mode = not self._select_mode
-        if self._select_mode:
-            self._select_index = max(0, len(self._messages) - 1)
-            self._show_select_status()
-        else:
-            self._select_index = 0
-            s = self.query_one("#sess-chat-status", Static)
-            s.update("")
-            try:
-                self.query_one("#sess-chat-input", Input).focus()
-            except Exception:
-                pass
-
-    def action_exit_select(self):
-        if self._select_mode:
-            self._select_mode = False
-            self._select_index = 0
-            s = self.query_one("#sess-chat-status", Static)
-            s.update("")
-            try:
-                self.query_one("#sess-chat-input", Input).focus()
-            except Exception:
-                pass
-
-    def _show_select_status(self):
-        if not self._messages:
-            s = self.query_one("#sess-chat-status", Static)
-            s.update("[dim]没有消息可选中[/dim]")
-            return
-        idx = self._select_index
-        m = self._messages[idx]
-        role = m["role"]
-        content = m["content"].replace("\n", " ")[:80]
-        label = {"user": "你", "assistant": "AI", "tool": "工具"}.get(role, role)
-        s = self.query_one("#sess-chat-status", Static)
-        s.update(
-            f"[bold yellow]选择模式[/bold yellow] "
-            f"[dim]{idx+1}/{len(self._messages)}[/dim] "
-            f"[bold]▸ {label}:[/bold] {content}"
-        )
-
-    def action_select_next(self):
-        if not self._select_mode:
-            return
-        if self._messages and self._select_index < len(self._messages) - 1:
-            self._select_index += 1
-            self._show_select_status()
-
-    def action_select_prev(self):
-        if not self._select_mode:
-            return
-        if self._messages and self._select_index > 0:
-            self._select_index -= 1
-            self._show_select_status()
-
-    def action_yank_selected(self):
-        if not self._select_mode or not self._messages:
-            return
-        m = self._messages[self._select_index]
-        self.app.copy_to_clipboard(m["content"])
-        s = self.query_one("#sess-chat-status", Static)
-        s.update("[bold bright_cyan]📋 已复制到剪贴板[/bold bright_cyan]")
-        self.set_timer(1.5, lambda: self._show_select_status())
 
     async def _delete_session(self, sid: str):
         s = self.query_one("#sess-chat-status", Static)
