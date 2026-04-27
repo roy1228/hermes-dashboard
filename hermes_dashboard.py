@@ -244,6 +244,11 @@ class SessionsPane(Vertical):
         Binding("ctrl+r", "rename_session", "重命名"),
         Binding("ctrl+y", "yank_last", "复制回复"),
         Binding("ctrl+c", "yank_last", "复制回复", show=False),
+        Binding("v", "toggle_select", "选择"),
+        Binding("j", "select_next", show=False),
+        Binding("k", "select_prev", show=False),
+        Binding("y", "yank_selected", show=False),
+        Binding("escape", "exit_select", show=False),
     ]
 
     def __init__(self):
@@ -253,6 +258,9 @@ class SessionsPane(Vertical):
         self._loading_bar_timer = None
         self._last_response = ""
         self._rename_target = None
+        self._messages: list[dict] = []
+        self._select_mode = False
+        self._select_index = 0
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -312,10 +320,10 @@ class SessionsPane(Vertical):
             self._last_response = content
         elif role == "tool":
             log.write(f"[bold yellow]🛠️ {tool_name or '工具执行'}[/bold yellow]")
-            # 工具输出截断
             display_content = content[:1000] + "..." if len(content) > 1000 else content
             log.write(display_content)
-        log.write("")  # Spacer
+        log.write("")
+        self._messages.append({"role": role, "content": content})
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -409,6 +417,7 @@ class SessionsPane(Vertical):
         
         # 清空对话流
         log.clear()
+        self._messages.clear()
         status.update("")
         
         # 重置新对话状态
@@ -448,7 +457,7 @@ class SessionsPane(Vertical):
                 self._send_chat()
             case "sess-resume-btn":
                 if sid:
-                    _copy_to_clipboard(f"hermes --resume {sid}")
+                    self.app.copy_to_clipboard(f"hermes --resume {sid}")
                     s = self.query_one("#sess-chat-status", Static)
                     s.update("[bold bright_cyan]📋 命令已复制到剪贴板[/bold bright_cyan]")
                     self.set_timer(2, lambda: s.update(""))
@@ -523,6 +532,7 @@ class SessionsPane(Vertical):
         self._active_session_id = sid
         log = self.query_one("#sess-chat-feed", RichLog)
         log.clear()
+        self._messages.clear()
         log.write("[dim]正在加载历史消息...[/dim]")
         self.run_worker(self._fetch_session_messages(sid), exclusive=True)
 
@@ -717,13 +727,78 @@ class SessionsPane(Vertical):
         text = self._last_response.strip()
         if not text:
             return
-        _copy_to_clipboard(text)
+        self.app.copy_to_clipboard(text)
         try:
             status = self.query_one("#sess-chat-status", Static)
-            status.update("[bold bright_cyan]📋 已复制到剪贴板[/bold bright_cyan]")
+            status.update("[bold bright_cyan]📋 已复制最后回复[/bold bright_cyan]")
             self.set_timer(2, lambda: status.update(""))
         except Exception:
             pass
+
+    def action_toggle_select(self):
+        self._select_mode = not self._select_mode
+        if self._select_mode:
+            self._select_index = max(0, len(self._messages) - 1)
+            self._show_select_status()
+        else:
+            self._select_index = 0
+            s = self.query_one("#sess-chat-status", Static)
+            s.update("")
+            try:
+                self.query_one("#sess-chat-input", Input).focus()
+            except Exception:
+                pass
+
+    def action_exit_select(self):
+        if self._select_mode:
+            self._select_mode = False
+            self._select_index = 0
+            s = self.query_one("#sess-chat-status", Static)
+            s.update("")
+            try:
+                self.query_one("#sess-chat-input", Input).focus()
+            except Exception:
+                pass
+
+    def _show_select_status(self):
+        if not self._messages:
+            s = self.query_one("#sess-chat-status", Static)
+            s.update("[dim]没有消息可选中[/dim]")
+            return
+        idx = self._select_index
+        m = self._messages[idx]
+        role = m["role"]
+        content = m["content"].replace("\n", " ")[:80]
+        label = {"user": "你", "assistant": "AI", "tool": "工具"}.get(role, role)
+        s = self.query_one("#sess-chat-status", Static)
+        s.update(
+            f"[bold yellow]选择模式[/bold yellow] "
+            f"[dim]{idx+1}/{len(self._messages)}[/dim] "
+            f"[bold]▸ {label}:[/bold] {content}"
+        )
+
+    def action_select_next(self):
+        if not self._select_mode:
+            return
+        if self._messages and self._select_index < len(self._messages) - 1:
+            self._select_index += 1
+            self._show_select_status()
+
+    def action_select_prev(self):
+        if not self._select_mode:
+            return
+        if self._messages and self._select_index > 0:
+            self._select_index -= 1
+            self._show_select_status()
+
+    def action_yank_selected(self):
+        if not self._select_mode or not self._messages:
+            return
+        m = self._messages[self._select_index]
+        self.app.copy_to_clipboard(m["content"])
+        s = self.query_one("#sess-chat-status", Static)
+        s.update("[bold bright_cyan]📋 已复制到剪贴板[/bold bright_cyan]")
+        self.set_timer(1.5, lambda: self._show_select_status())
 
     async def _delete_session(self, sid: str):
         s = self.query_one("#sess-chat-status", Static)
