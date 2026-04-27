@@ -251,6 +251,7 @@ class SessionsPane(Vertical):
         self._active_session_id = None
         self._loading_bar_timer = None
         self._last_response = ""
+        self._rename_target = None
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -261,6 +262,7 @@ class SessionsPane(Vertical):
                     Input(placeholder="搜索...", id="sess-search"),
                     Button("搜", id="sess-search-btn", variant="primary"),
                     Button("删除", id="sess-delete-btn", variant="warning"),
+                    Button("重命名", id="sess-rename-btn"),
                     id="sess-search-bar"
                 ),
                 DataTable(id="sess-table"),
@@ -452,16 +454,44 @@ class SessionsPane(Vertical):
             case "sess-delete-btn":
                 if sid:
                     self.run_worker(self._delete_session(sid), exclusive=True)
+            case "sess-rename-btn":
+                if sid:
+                    inp = self.query_one("#sess-search", Input)
+                    self._rename_target = sid
+                    inp.value = ""
+                    inp.placeholder = "新会话名 (Enter 确认)"
+                    inp.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "sess-chat-input":
             self._send_chat()
         elif event.input.id == "sess-search":
             q = self.query_one("#sess-search", Input).value.strip()
-            if q:
+            if self._rename_target and q:
+                self._do_rename(self._rename_target, q)
+                self._rename_target = None
+                self.query_one("#sess-search", Input).placeholder = "搜索..."
+            elif q:
                 self.run_worker(self._search_sessions(q), exclusive=True)
             else:
+                self._rename_target = None
+                self.query_one("#sess-search", Input).placeholder = "搜索..."
                 self.load_sessions()
+
+    def _do_rename(self, sid: str, new_title: str):
+        s = self.query_one("#sess-chat-status", Static)
+        s.update(f"[dim]⏳ 重命名 {sid}...[/dim]")
+        self.run_worker(self._rename_session(sid, new_title), exclusive=True)
+
+    async def _rename_session(self, sid: str, title: str):
+        s = self.query_one("#sess-chat-status", Static)
+        raw = hermes("sessions", "rename", sid, title, timeout=10)
+        if "renamed" in raw.lower() or "set" in raw.lower() or not raw:
+            s.update(f"[green]✅ 已重命名为: {title}[/green]")
+        else:
+            s.update(f"[yellow]重命名结果: {raw[:80]}[/yellow]")
+        self.set_timer(3, lambda: s.update(""))
+        self.load_sessions()
 
     async def _search_sessions(self, q: str):
         safe_q = shlex.quote(q)
