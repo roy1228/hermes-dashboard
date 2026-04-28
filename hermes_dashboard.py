@@ -19,13 +19,12 @@ import json
 import os
 import shlex
 import re
-import yaml
 from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
-    Header, Footer, Static, DataTable, Label, Button, Input,
+    Footer, Static, DataTable, Label, Button, Input,
     TextArea, RichLog, TabbedContent, TabPane
 )
 from textual.binding import Binding
@@ -84,26 +83,6 @@ def _copy_to_clipboard(text: str):
             break
         except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
-
-
-def _get_config() -> dict:
-    config_path = HERMES_HOME / "config.yaml"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                return yaml.safe_load(f) or {}
-        except Exception:
-            pass
-    return {}
-
-def _get_provider_model() -> tuple[str, str]:
-    cfg = _get_config()
-    mc = cfg.get("model", {}) if isinstance(cfg, dict) else {}
-    if isinstance(mc, dict):
-        provider = str(mc.get("provider", "")).strip()
-        model = str(mc.get("default", "") or mc.get("model", "")).strip()
-        return (provider, model)
-    return ("", "")
 
 
 # ──────────────────────────────────────────────
@@ -1173,8 +1152,6 @@ class HermesDashboard(App):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield SystemStatusBar()
         with TabbedContent(initial="tab-sessions"):
             yield TabPane("状态", StatusContent(), id="tab-status")
             yield TabPane("会话", SessionsPane(), id="tab-sessions")
@@ -1189,19 +1166,19 @@ class HermesDashboard(App):
         try:
             if pane.id == "tab-status":
                 for sc in self.query(StatusContent):
-                    if sc.is_attached_to_dom:
+                    if sc.display:
                         sc.reload_data()
             elif pane.id == "tab-sessions":
                 for sp in self.query(SessionsPane):
-                    if sp.is_attached_to_dom:
+                    if sp.display:
                         sp.load_sessions()
             elif pane.id == "tab-crons":
                 for cp in self.query(CronsPane):
-                    if cp.is_attached_to_dom:
+                    if cp.display:
                         cp.load_crons()
             elif pane.id == "tab-env":
                 for ep in self.query(EnvPane):
-                    if ep.is_attached_to_dom:
+                    if ep.display:
                         ep.load_env()
             elif pane.id == "tab-logs":
                 pass
@@ -1212,17 +1189,14 @@ class HermesDashboard(App):
         """安全刷新：只刷新已挂载的组件，避免跨 Tab 闪退。"""
         try:
             for sc in self.query(StatusContent):
-                if sc.is_attached_to_dom:
+                if sc.display:
                     sc.reload_data()
             for sp in self.query(SessionsPane):
-                if sp.is_attached_to_dom:
+                if sp.display:
                     sp.load_sessions()
             for cp in self.query(CronsPane):
-                if cp.is_attached_to_dom:
+                if cp.display:
                     cp.load_crons()
-            for wc in self.query(SystemStatusBar):
-                if wc.is_attached_to_dom:
-                    wc.reload_data()
         except Exception:
             pass
 
@@ -1235,47 +1209,11 @@ class HermesDashboard(App):
 
     def action_toggle_fullscreen(self):
         for sp in self.query(SessionsPane):
-            if sp.is_attached_to_dom:
+            try:
                 sp._toggle_fullscreen()
                 return
-
-
-class SystemStatusBar(Static):
-    """顶部系统状态条。"""
-
-    DEFAULT_CSS = """
-    SystemStatusBar {
-        background: $primary-background;
-        color: $primary;
-        padding: 0 2;
-        height: 3;
-        dock: top;
-    }
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__("", **kwargs)
-        self.set_interval(60, self.refresh_status)
-
-    def on_mount(self):
-        self.refresh_status()
-
-    def refresh_status(self):
-        self.run_worker(self._fetch, exclusive=True)
-
-    async def _fetch(self):
-        provider, model = _get_provider_model()
-        gw_raw = shell("curl -s http://127.0.0.1:9119/api/status 2>/dev/null")
-        try:
-            gw = json.loads(gw_raw)
-        except Exception:
-            gw = {}
-        gw_state = gw.get("gateway_state", "unknown")
-        active = gw.get("active_sessions", 0)
-        icon = {"running": "[green]●ON[/green]", "stopped": "[red]●OFF[/red]"}.get(gw_state, "[yellow]●?[/yellow]")
-        uptime = shell("uptime -p")
-        self.update(f" [bold]Model:[/bold] {model}  [bold]Gateway:[/bold] {icon}  [bold]Sessions:[/bold] {active}  {uptime}")
-
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     app = HermesDashboard()
