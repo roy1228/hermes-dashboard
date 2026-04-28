@@ -26,11 +26,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
     Header, Footer, Static, DataTable, Label, Button, Input,
-    TextArea, TabbedContent, TabPane
+    TextArea, RichLog, TabbedContent, TabPane
 )
 from textual.binding import Binding
 from textual import work, on
 from rich.text import Text
+from rich.markdown import Markdown
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -167,6 +168,7 @@ class SessionsPane(Vertical):
         self._loading_bar_timer = None
         self._last_response = ""
         self._rename_target = None
+        self._fullscreen = False
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -185,11 +187,15 @@ class SessionsPane(Vertical):
             ),
             Vertical(
                 Vertical(
-                    Static("", id="sess-chat-status"),
+                    Horizontal(
+                        Static("", id="sess-chat-status"),
+                        Button("◀ 列表", id="sess-fullscreen-btn"),
+                        id="sess-chat-status-row"
+                    ),
                     Static("", id="sess-chat-loading-bar"),
                     id="sess-chat-status-area"
                 ),
-                TextArea(id="sess-chat-feed", read_only=True, soft_wrap=True),
+                RichLog(id="sess-chat-feed", markup=True, highlight=True, wrap=True),
                 Horizontal(
                     Input(placeholder="输入消息 (Enter 发送)", id="sess-chat-input"),
                     Button("发送", id="sess-chat-send", variant="primary"),
@@ -208,8 +214,9 @@ class SessionsPane(Vertical):
         table.add_columns("", "会话", "时间")
         self.load_sessions()
         
-        log = self.query_one("#sess-chat-feed", TextArea)
-        log.load_text("← 选中左侧会话查看历史，或点击「新对话」开始\nCtrl+A 全选 · 鼠标拖拽选中 · Ctrl+C 复制\n")
+        log = self.query_one("#sess-chat-feed", RichLog)
+        log.write("[dim]← 选中左侧会话查看历史[/dim]")
+        log.write("[dim]鼠标拖拽选中文本 → Cmd+C 复制[/dim]")
         
         try:
             self._stop_loading_bar()
@@ -217,21 +224,24 @@ class SessionsPane(Vertical):
             pass
 
     def _add_chat_message(self, role: str, content: str, tool_name: str | None = None):
-        log = self.query_one("#sess-chat-feed", TextArea)
+        log = self.query_one("#sess-chat-feed", RichLog)
         if role == "user":
-            log.text += f"\n▸ 你: {content}\n"
+            log.write(f"[bold green]▸ 你[/bold green]")
+            log.write(Text(content, style="bold"))
+            log.write("")
         elif role == "assistant":
-            log.text += f"\n◂ AI:\n{content}\n"
+            log.write("[bold cyan]◂ AI[/bold cyan]")
+            log.write(Markdown(content))
             self._last_response = content
+            log.write("")
         elif role == "tool":
             name = tool_name or "工具"
             first_line = content.split("\n")[0].strip()[:120]
             total = len(content)
             if total > len(first_line):
-                log.text += f"\n  🔧 {name}: {first_line}... ({total} 字符)\n"
+                log.write(f"[dim]  🔧 [bold yellow]{name}[/bold yellow] {first_line}... [italic]({total} 字符)[/italic][/dim]")
             else:
-                log.text += f"\n  🔧 {name}: {first_line}\n"
-        log.cursor_position = len(log.text)
+                log.write(f"[dim]  🔧 [bold yellow]{name}[/bold yellow] {first_line}[/dim]")
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -318,12 +328,12 @@ class SessionsPane(Vertical):
         return None
 
     def _new_conversation(self):
-        log = self.query_one("#sess-chat-feed", TextArea)
+        log = self.query_one("#sess-chat-feed", RichLog)
         status = self.query_one("#sess-chat-status", Static)
         self._stop_loading_bar()
 
         log.clear()
-        status.update("")
+        status.update("[bold green]新对话已就绪[/bold green]")
 
         self._is_new_conv = True
         self._active_session_id = None
@@ -353,7 +363,7 @@ class SessionsPane(Vertical):
             case "sess-search-btn":
                 q = self.query_one("#sess-search", Input).value.strip()
                 if q:
-                    self.run_worker(self._search_sessions(q), exclusive=True)
+                    asyncio.create_task(self._search_sessions(q))
                 else:
                     self.load_sessions()
             case "sess-chat-send":
@@ -370,6 +380,8 @@ class SessionsPane(Vertical):
             case "sess-rename-btn":
                 if sid:
                     self._enter_rename_mode(sid)
+            case "sess-fullscreen-btn":
+                self._toggle_fullscreen()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "sess-chat-input":
@@ -381,7 +393,7 @@ class SessionsPane(Vertical):
                 self._rename_target = None
                 self.query_one("#sess-search", Input).placeholder = "搜索..."
             elif q:
-                self.run_worker(self._search_sessions(q), exclusive=True)
+                asyncio.create_task(self._search_sessions(q))
             else:
                 self._rename_target = None
                 self.query_one("#sess-search", Input).placeholder = "搜索..."
@@ -404,7 +416,7 @@ class SessionsPane(Vertical):
 
     async def _search_sessions(self, q: str):
         safe_q = shlex.quote(q)
-        raw = shell(f"hermes sessions list --source cli --limit 80 2>/dev/null | grep -i {safe_q}")
+        raw = await _shell_async(f"hermes sessions list --source cli --limit 80 2>/dev/null | grep -i {safe_q}", timeout=20)
         table = self.query_one("#sess-table", DataTable)
         table.clear()
         for line in raw.strip().split("\n"):
@@ -426,43 +438,45 @@ class SessionsPane(Vertical):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         key = event.row_key
-        if key:
+        if key.value:
             self._load_session_chat(str(key.value))
 
     def _load_session_chat(self, sid: str):
         self._is_new_conv = False
         self._active_session_id = sid
-        log = self.query_one("#sess-chat-feed", TextArea)
+        log = self.query_one("#sess-chat-feed", RichLog)
         log.clear()
-        log.load_text("正在加载历史消息...\n")
-        self.run_worker(self._fetch_session_messages(sid), exclusive=True)
+        log.write("[dim]正在加载历史消息...[/dim]")
+        status = self.query_one("#sess-chat-status", Static)
+        status.update("[dim]⏳ 加载中...[/dim]")
+        asyncio.create_task(self._fetch_session_messages(sid))
 
     async def _fetch_session_messages(self, sid: str):
-        log = self.query_one("#sess-chat-feed", TextArea)
-        log.text = ""
+        log = self.query_one("#sess-chat-feed", RichLog)
+        log.clear()
 
-        raw = shell(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
+        raw = await _shell_async(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
         if not raw:
-            log.text = "无法获取会话内容"
+            self._add_chat_message("assistant", "[red]无法获取会话内容[/red]")
             return
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            log.text = "解析失败"
+            self._add_chat_message("assistant", "[red]解析失败[/red]")
             return
 
         msgs = data.get("messages", [])
         model = data.get("model", "?")
-        log.text = ""
+        log.clear()
 
         header = (
-            f"━━━ 会话: {sid} ━━━\n\n"
-            f"模型: {model} | 消息数: {len(msgs)}\n"
-            f"恢复: hermes --resume {sid}\n"
+            f"**━━━ 会话: {sid} ━━━**\n\n"
+            f"[dim]模型: {model} | 消息数: {len(msgs)} | 恢复命令: hermes --resume {sid}[/dim]"
         )
         self._add_chat_message("assistant", header)
 
+        count = 0
         for m in msgs:
             role = m.get("role", "")
             content = str(m.get("content", "")).strip()
@@ -473,12 +487,16 @@ class SessionsPane(Vertical):
                 continue
 
             if len(content) > 3000:
-                content = content[:3000] + f"\n\n... (省略 {len(content) - 3000} 字符，完整内容: hermes --resume {sid})"
+                content = content[:3000] + f"\n\n[dim italic]... (省略 {len(content) - 3000} 字符，完整内容: hermes --resume {sid})[/dim italic]"
 
             tool_name = None
             if role == "tool":
                 tool_name = m.get("name") or m.get("tool_name") or "工具"
             self._add_chat_message(role, content, tool_name)
+
+        status = self.query_one("#sess-chat-status", Static)
+        status.update("[bold green]✅ 已加载[/bold green]")
+        self.set_timer(3, lambda: status.update(""))
 
     def _send_chat(self):
         """发送消息：智能路由到新建或继续会话。"""
@@ -596,6 +614,19 @@ class SessionsPane(Vertical):
 
     def action_new_chat(self):
         self._new_conversation()
+
+    def _toggle_fullscreen(self):
+        self._fullscreen = not self._fullscreen
+        left = self.query_one("#sess-left", Vertical)
+        btn = self.query_one("#sess-fullscreen-btn", Button)
+        if self._fullscreen:
+            left.display = False
+            btn.label = "▶ 列表"
+            btn.variant = "success"
+        else:
+            left.display = True
+            btn.label = "◀ 列表"
+            btn.variant = "default"
 
     def action_rename_session(self):
         sid = self._selected_sid()
@@ -791,7 +822,7 @@ class CronsPane(Vertical):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         jid = event.row_key
-        if jid:
+        if jid.value:
             self.run_worker(self._show_cron_detail(str(jid.value)), exclusive=True)
 
     async def _show_cron_detail(self, jid: str):
@@ -966,7 +997,7 @@ class EnvPane(Vertical):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         key = event.row_key
-        if key:
+        if key.value:
             key_val = key.value
             entry = next((e for e in self._entries if e["key"] == key_val), None)
             if entry:
@@ -1078,10 +1109,12 @@ class HermesDashboard(App):
     }
     #sess-left {
         width: 30%;
+        height: 1fr;
         border: solid $primary 50%;
     }
     #sess-right {
         width: 1fr;
+        height: 1fr;
         border: solid $primary 50%;
     }
     #sess-table {
@@ -1093,10 +1126,9 @@ class HermesDashboard(App):
         border: solid $primary 50%;
     }
     #sess-chat-status-area {
-        height: auto;
+        height: 3;
         padding: 0 1;
         margin-bottom: 0;
-        min-height: 2;
     }
     #sess-chat-status {
         height: auto;
@@ -1121,6 +1153,7 @@ class HermesDashboard(App):
     }
     TabbedContent { height: 1fr; }
     TabPane { height: 1fr; }
+    SessionsPane { height: 1fr; }
     #tab-status { height: 1fr; }
     #tab-sessions { height: 1fr; }
     #tab-crons { height: 1fr; }
@@ -1131,6 +1164,7 @@ class HermesDashboard(App):
     BINDINGS = [
         Binding("q", "quit", "退出", show=True),
         Binding("r", "refresh", "刷新", show=True),
+        Binding("ctrl+f", "toggle_fullscreen", "全屏"),
         Binding("1", "switch_tab('tab-status')", "状态"),
         Binding("2", "switch_tab('tab-sessions')", "会话"),
         Binding("3", "switch_tab('tab-crons')", "任务"),
@@ -1198,6 +1232,12 @@ class HermesDashboard(App):
             tabs.active = tab_id
         except Exception:
             pass
+
+    def action_toggle_fullscreen(self):
+        for sp in self.query(SessionsPane):
+            if sp.is_attached_to_dom:
+                sp._toggle_fullscreen()
+                return
 
 
 class SystemStatusBar(Static):
