@@ -25,12 +25,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
     Footer, Static, DataTable, Label, Button, Input,
-    TextArea, RichLog, TabbedContent, TabPane
+    TextArea, TabbedContent, TabPane
 )
 from textual.binding import Binding
 from textual import work, on
-from rich.text import Text
-from rich.markdown import Markdown
 
 # ──────────────────────────────────────────────
 # 工具函数
@@ -57,17 +55,26 @@ def hermes(*args: str, timeout: int = 15) -> str:
 def shell(cmd: str, timeout: int = 15) -> str:
     return _run(cmd, timeout=timeout, shell=True)
 
-async def _shell_async(cmd: str, timeout: int = 15) -> str:
+async def _shell_async(cmd: str, timeout: int | None = None) -> str:
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, "HERMES_HOME": str(HERMES_HOME)},
+            env={
+                **os.environ,
+                "HERMES_HOME": str(HERMES_HOME),
+                "HERMES_YOLO_MODE": "1",
+            },
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if timeout is None:
+            stdout, _ = await proc.communicate()
+        else:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return (stdout.decode() if stdout else "").strip()
     except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
         return "(timeout)"
     except Exception as e:
         return f"(error: {e})"
@@ -174,9 +181,9 @@ class SessionsPane(Vertical):
                     Static("", id="sess-chat-loading-bar"),
                     id="sess-chat-status-area"
                 ),
-                RichLog(id="sess-chat-feed", markup=True, highlight=True, wrap=True),
+                TextArea(id="sess-chat-feed", read_only=True, soft_wrap=True),
                 Horizontal(
-                    Input(placeholder="输入消息 (Enter 发送)", id="sess-chat-input"),
+                    TextArea(id="sess-chat-input", soft_wrap=True),
                     Button("发送", id="sess-chat-send", variant="primary"),
                     Button("复制恢复命令", id="sess-resume-btn", variant="warning"),
                     id="sess-chat-bar"
@@ -193,9 +200,8 @@ class SessionsPane(Vertical):
         table.add_columns("", "会话", "时间")
         self.load_sessions()
         
-        log = self.query_one("#sess-chat-feed", RichLog)
-        log.write("[dim]← 选中左侧会话查看历史[/dim]")
-        log.write("[dim]鼠标拖拽选中文本 → Cmd+C 复制[/dim]")
+        log = self.query_one("#sess-chat-feed", TextArea)
+        log.load_text("← 选中左侧会话查看历史\n鼠标拖拽选中文本 → Ctrl+C 复制\n")
         
         try:
             self._stop_loading_bar()
@@ -203,24 +209,21 @@ class SessionsPane(Vertical):
             pass
 
     def _add_chat_message(self, role: str, content: str, tool_name: str | None = None):
-        log = self.query_one("#sess-chat-feed", RichLog)
+        log = self.query_one("#sess-chat-feed", TextArea)
         if role == "user":
-            log.write(f"[bold green]▸ 你[/bold green]")
-            log.write(Text(content, style="bold"))
-            log.write("")
+            log.text += f"\n▸ 你: {content}\n"
         elif role == "assistant":
-            log.write("[bold cyan]◂ AI[/bold cyan]")
-            log.write(Markdown(content))
+            log.text += f"\n◂ AI:\n{content}\n"
             self._last_response = content
-            log.write("")
         elif role == "tool":
             name = tool_name or "工具"
             first_line = content.split("\n")[0].strip()[:120]
             total = len(content)
             if total > len(first_line):
-                log.write(f"[dim]  🔧 [bold yellow]{name}[/bold yellow] {first_line}... [italic]({total} 字符)[/italic][/dim]")
+                log.text += f"\n  🔧 {name}: {first_line}... ({total} 字符)\n"
             else:
-                log.write(f"[dim]  🔧 [bold yellow]{name}[/bold yellow] {first_line}[/dim]")
+                log.text += f"\n  🔧 {name}: {first_line}\n"
+        log.cursor_position = len(log.text)
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -307,11 +310,11 @@ class SessionsPane(Vertical):
         return None
 
     def _new_conversation(self):
-        log = self.query_one("#sess-chat-feed", RichLog)
+        log = self.query_one("#sess-chat-feed", TextArea)
         status = self.query_one("#sess-chat-status", Static)
         self._stop_loading_bar()
 
-        log.clear()
+        log.text = ""
         status.update("[bold green]新对话已就绪[/bold green]")
 
         self._is_new_conv = True
@@ -325,9 +328,9 @@ class SessionsPane(Vertical):
             "(加载 Memory、Skills、Tools，自动保存)"
         )
         
-        # 聚焦输入框
+        inp = self.query_one("#sess-chat-input", TextArea)
+        inp.read_only = False
         try:
-            inp = self.query_one("#sess-chat-input", Input)
             inp.focus()
         except Exception:
             pass
@@ -349,7 +352,7 @@ class SessionsPane(Vertical):
                 self._send_chat()
             case "sess-resume-btn":
                 if sid:
-                    self.app.copy_to_clipboard(f"hermes --resume {sid}")
+                    _copy_to_clipboard(f"hermes --resume {sid}")
                     s = self.query_one("#sess-chat-status", Static)
                     s.update("[bold bright_cyan]📋 命令已复制到剪贴板[/bold bright_cyan]")
                     self.set_timer(2, lambda: s.update(""))
@@ -362,10 +365,17 @@ class SessionsPane(Vertical):
             case "sess-fullscreen-btn":
                 self._toggle_fullscreen()
 
+    def on_key(self, event):
+        if event.key == "enter" and event.ctrl:
+            return  # Ctrl+Enter → let TextArea handle (newline)
+        if event.key == "enter":
+            focused = self.focused
+            if focused and focused.id == "sess-chat-input":
+                self._send_chat()
+                event.prevent_default()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "sess-chat-input":
-            self._send_chat()
-        elif event.input.id == "sess-search":
+        if event.input.id == "sess-search":
             q = self.query_one("#sess-search", Input).value.strip()
             if self._rename_target and q:
                 self._do_rename(self._rename_target, q)
@@ -423,35 +433,37 @@ class SessionsPane(Vertical):
     def _load_session_chat(self, sid: str):
         self._is_new_conv = False
         self._active_session_id = sid
-        log = self.query_one("#sess-chat-feed", RichLog)
-        log.clear()
-        log.write("[dim]正在加载历史消息...[/dim]")
+        log = self.query_one("#sess-chat-feed", TextArea)
+        log.load_text("正在加载历史消息...\n")
         status = self.query_one("#sess-chat-status", Static)
         status.update("[dim]⏳ 加载中...[/dim]")
+        inp = self.query_one("#sess-chat-input", TextArea)
+        inp.read_only = False
         asyncio.create_task(self._fetch_session_messages(sid))
 
     async def _fetch_session_messages(self, sid: str):
-        log = self.query_one("#sess-chat-feed", RichLog)
-        log.clear()
+        log = self.query_one("#sess-chat-feed", TextArea)
+        log.load_text("")
 
         raw = await _shell_async(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
         if not raw:
-            self._add_chat_message("assistant", "[red]无法获取会话内容[/red]")
+            log.text = "无法获取会话内容"
             return
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            self._add_chat_message("assistant", "[red]解析失败[/red]")
+            log.text = "解析失败"
             return
 
         msgs = data.get("messages", [])
         model = data.get("model", "?")
-        log.clear()
+        log.load_text("")
 
         header = (
-            f"**━━━ 会话: {sid} ━━━**\n\n"
-            f"[dim]模型: {model} | 消息数: {len(msgs)} | 恢复命令: hermes --resume {sid}[/dim]"
+            f"━━━ 会话: {sid} ━━━\n\n"
+            f"模型: {model} | 消息数: {len(msgs)}\n"
+            f"恢复: hermes --resume {sid}\n"
         )
         self._add_chat_message("assistant", header)
 
@@ -465,9 +477,6 @@ class SessionsPane(Vertical):
             if role == "assistant" and not content and not m.get("tool_calls"):
                 continue
 
-            if len(content) > 3000:
-                content = content[:3000] + f"\n\n[dim italic]... (省略 {len(content) - 3000} 字符，完整内容: hermes --resume {sid})[/dim italic]"
-
             tool_name = None
             if role == "tool":
                 tool_name = m.get("name") or m.get("tool_name") or "工具"
@@ -478,17 +487,16 @@ class SessionsPane(Vertical):
         self.set_timer(3, lambda: status.update(""))
 
     def _send_chat(self):
-        """发送消息：智能路由到新建或继续会话。"""
-        inp = self.query_one("#sess-chat-input", Input)
-        msg = inp.value.strip()
+        inp = self.query_one("#sess-chat-input", TextArea)
+        msg = inp.text.strip()
         if not msg:
             return
-        inp.value = ""
+        inp.clear()
         
         status = self.query_one("#sess-chat-status", Static)
         self._add_chat_message("user", msg)
         self._start_loading_bar()
-        inp.disabled = True
+        inp.read_only = True
         
         # 核心逻辑：如果有 active_id 就继续，否则新建
         if self._active_session_id:
@@ -500,18 +508,18 @@ class SessionsPane(Vertical):
 
     async def _do_create_session(self, msg: str):
         status = self.query_one("#sess-chat-status", Static)
-        inp = self.query_one("#sess-chat-input", Input)
+        inp = self.query_one("#sess-chat-input", TextArea)
 
         safe_msg = shlex.quote(msg)
         cmd = f"hermes chat -q {safe_msg} -Q 2>&1"
 
-        raw = await _shell_async(cmd, timeout=300)
+        raw = await _shell_async(cmd)
         if raw.startswith("(timeout)") or raw.startswith("(error:"):
             self._add_chat_message("assistant", f"[red]请求超时或错误: {raw}[/red]")
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
-            inp.disabled = False
+            inp.read_only = False
             return
         
         session_id, cleaned = self._parse_chat_output(raw)
@@ -528,23 +536,23 @@ class SessionsPane(Vertical):
         self._stop_loading_bar()
         status.update("[bold green]✅ 完成[/bold green]")
         self.set_timer(3, lambda: status.update(""))
-        inp.disabled = False
+        inp.read_only = False
 
     async def _do_resume_session(self, sid: str, msg: str):
         status = self.query_one("#sess-chat-status", Static)
-        inp = self.query_one("#sess-chat-input", Input)
+        inp = self.query_one("#sess-chat-input", TextArea)
 
         safe_msg = shlex.quote(msg)
         safe_sid = shlex.quote(sid)
         cmd = f"hermes chat -r {safe_sid} -q {safe_msg} -Q 2>&1"
 
-        raw = await _shell_async(cmd, timeout=300)
+        raw = await _shell_async(cmd)
         if raw.startswith("(timeout)") or raw.startswith("(error:"):
             self._add_chat_message("assistant", f"[red]请求超时或错误: {raw}[/red]")
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
-            inp.disabled = False
+            inp.read_only = False
             return
         
         session_id, cleaned = self._parse_chat_output(raw)
@@ -558,7 +566,7 @@ class SessionsPane(Vertical):
         self._stop_loading_bar()
         status.update("[bold green]✅ 回复完成[/bold green]")
         self.set_timer(3, lambda: status.update(""))
-        inp.disabled = False
+        inp.read_only = False
 
     def _parse_chat_output(self, raw: str) -> tuple[str | None, str]:
         """Parse hermes chat -Q output: (session_id, clean_response).
@@ -628,7 +636,7 @@ class SessionsPane(Vertical):
         text = self._last_response.strip()
         if not text:
             return
-        self.app.copy_to_clipboard(text)
+        _copy_to_clipboard(text)
         try:
             status = self.query_one("#sess-chat-status", Static)
             status.update("[bold bright_cyan]📋 已复制最后回复[/bold bright_cyan]")
@@ -1103,6 +1111,7 @@ class HermesDashboard(App):
         height: 1fr;
         background: $surface;
         border: solid $primary 50%;
+        scrollbar-size: 0 0;
     }
     #sess-chat-status-area {
         height: 3;
@@ -1122,6 +1131,9 @@ class HermesDashboard(App):
     #sess-chat-bar {
         dock: bottom;
         height: auto;
+    }
+    #sess-chat-input {
+        height: 3;
     }
     #sess-search-bar {
         height: auto;
