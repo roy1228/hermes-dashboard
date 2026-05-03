@@ -291,6 +291,10 @@ class SessionsPane(Vertical):
         raw = hermes("sessions", "list", "--source", "cli", "--limit", "80", timeout=20)
         table = self.query_one("#sess-table", DataTable)
         table.clear()
+
+        # Parse sessions into groups
+        sessions_by_group: dict[str, list[tuple]] = {g.key: [] for g in GROUPS}
+
         for line in raw.strip().split("\n"):
             if not line.strip() or line.startswith("Title") or line.startswith("─"):
                 continue
@@ -307,8 +311,30 @@ class SessionsPane(Vertical):
             preview_end = before.rfind(ago) - 1 if ago and m2 else len(before)
             preview = line[preview_start:max(preview_end, preview_start)].strip() if preview_end > preview_start else ""
             display_name = preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
+
+            hours = _parse_ago_to_hours(ago)
+            group = _get_group_for_hours(hours)
             active_marker = "◀" if sid == self._active_session_id else " "
-            table.add_row(active_marker, display_name, ago, key=sid)
+            sessions_by_group[group.key].append((active_marker, display_name, ago, sid))
+
+        # Render groups and their sessions
+        if self._search_mode:
+            # Search mode: flat list, no group headers
+            for group in GROUPS:
+                for active_marker, display_name, ago, sid in sessions_by_group[group.key]:
+                    table.add_row(active_marker, display_name, ago, key=sid)
+        else:
+            # Normal mode: group headers + sessions
+            for group in GROUPS:
+                is_collapsed = group.key in self._collapsed_groups
+                count = len(sessions_by_group[group.key])
+                icon = "▸" if is_collapsed else "▾"
+                header_label = f"{icon} {group.name}（{count} 个对话）"
+                table.add_row("", header_label, "", key=f"{GROUP_KEY_PREFIX}{group.key}")
+
+                if not is_collapsed:
+                    for active_marker, display_name, ago, sid in sessions_by_group[group.key]:
+                        table.add_row(active_marker, display_name, ago, key=sid)
 
     def _selected_sid(self) -> str | None:
         table = self.query_one("#sess-table", DataTable)
