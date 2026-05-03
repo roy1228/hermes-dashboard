@@ -467,8 +467,23 @@ class SessionsPane(Vertical):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         key = event.row_key
-        if key.value:
-            self._load_session_chat(str(key.value))
+        if not key.value:
+            return
+
+        # Check if this is a group header row
+        if str(key.value).startswith(GROUP_KEY_PREFIX):
+            self._toggle_group(key.value)
+            return
+
+        self._load_session_chat(str(key.value))
+
+    def _toggle_group(self, group_key: str):
+        """Toggle expanded state of a group and refresh the table."""
+        if group_key in self._collapsed_groups:
+            self._collapsed_groups.discard(group_key)
+        else:
+            self._collapsed_groups.add(group_key)
+        self.load_sessions()
 
     def _load_session_chat(self, sid: str):
         self._is_new_conv = False
