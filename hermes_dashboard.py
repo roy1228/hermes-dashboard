@@ -164,6 +164,11 @@ class SessionsPane(Vertical):
         self._last_response = ""
         self._rename_target = None
         self._fullscreen = False
+        # NEW: Collapsible group state
+        self._collapsed_groups: set[str] = {
+            g.key for g in GROUPS if not g.expanded
+        }
+        self._search_mode = False
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
