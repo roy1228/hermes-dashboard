@@ -285,6 +285,7 @@ class SessionsPane(Vertical):
             pass
 
     def load_sessions(self):
+        self._search_mode = False
         self.run_worker(self._fetch_sessions, exclusive=True)
 
     async def _fetch_sessions(self):
@@ -444,6 +445,7 @@ class SessionsPane(Vertical):
         self.load_sessions()
 
     async def _search_sessions(self, q: str):
+        self._search_mode = True
         safe_q = shlex.quote(q)
         raw = await _shell_async(f"hermes sessions list --source cli --limit 80 2>/dev/null | grep -i {safe_q}", timeout=20)
         table = self.query_one("#sess-table", DataTable)
