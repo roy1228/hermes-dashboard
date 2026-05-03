@@ -1,0 +1,125 @@
+<h2>历史对话栏 — 折叠分组方案</h2>
+<p class="subtitle">点击选择你偏好的分组展示方式</p>
+
+<div class="mockup">
+  <div class="mockup-header">当前状态 → 改进方案</div>
+  <div class="mockup-body">
+
+    <div class="section">
+      <h3>方案 A：可折叠分组（推荐）</h3>
+      <p class="subtitle">每组有标题栏，点击展开/收起，默认展开近期对话</p>
+
+      <div style="background: #1a1a2e; border: 1px solid #444; border-radius: 6px; padding: 0; margin-top: 12px; font-family: monospace; font-size: 13px;">
+        <!-- 今天/24h -->
+        <div style="padding: 6px 12px; background: #2a2a4a; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #8be9fd; font-weight: bold;">▾ 今天（24h 内）</span>
+          <span style="color: #666; font-size: 11px;">3 个对话</span>
+        </div>
+        <div style="padding: 4px 0;">
+          <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">◀ 修复登录 bug</div>
+          <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  API 集成测试</div>
+          <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  部署脚本优化</div>
+        </div>
+
+        <!-- 3天内 -->
+        <div style="padding: 6px 12px; background: #2a2a4a; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #8be9fd; font-weight: bold;">▾ 3 天内</span>
+          <span style="color: #666; font-size: 11px;">2 个对话</span>
+        </div>
+        <div style="padding: 4px 0;">
+          <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  数据库迁移方案</div>
+          <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  用户反馈分析</div>
+        </div>
+
+        <!-- 3-7天 折叠 -->
+        <div style="padding: 6px 12px; background: #2a2a4a; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #8be9fd; font-weight: bold;">▸ 3-7 天</span>
+          <span style="color: #666; font-size: 11px;">5 个对话</span>
+        </div>
+
+        <!-- 7天-1月 折叠 -->
+        <div style="padding: 6px 12px; background: #2a2a4a; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #8be9fd; font-weight: bold;">▸ 7 天 - 1 个月</span>
+          <span style="color: #666; font-size: 11px;">12 个对话</span>
+        </div>
+
+        <!-- 1月以上 折叠 -->
+        <div style="padding: 6px 12px; background: #2a2a4a; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #8be9fd; font-weight: bold;">▸ 1 个月以上</span>
+          <span style="color: #666; font-size: 11px;">28 个对话</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top: 20px;">
+      <h3>方案 B：分隔线 + 折叠</h3>
+      <p class="subtitle">用分隔线区分时间段，远期对话自动折叠</p>
+
+      <div style="background: #1a1a2e; border: 1px solid #444; border-radius: 6px; padding: 0; margin-top: 12px; font-family: monospace; font-size: 13px;">
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">◀ 修复登录 bug</div>
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  API 集成测试</div>
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  部署脚本优化</div>
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  数据库迁移方案</div>
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #f8f8f2;">  用户反馈分析</div>
+
+        <div style="padding: 4px 12px; background: #2a2a4a; color: #8be9fd; font-size: 11px; font-weight: bold; border-top: 2px solid #555; border-bottom: 2px solid #555;">
+          ── 3 天前 ──
+        </div>
+
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #aaa;">  旧项目重构</div>
+        <div style="padding: 6px 12px; border-bottom: 1px solid #333; color: #aaa;">  代码审查</div>
+
+        <div style="padding: 4px 12px; background: #2a2a4a; color: #8be9fd; font-size: 11px; font-weight: bold; border-top: 2px solid #555; border-bottom: 2px solid #555;">
+          ── 7 天前 ▸ 展开 12 个对话 ──
+        </div>
+
+        <div style="padding: 4px 12px; background: #2a2a4a; color: #8be9fd; font-size: 11px; font-weight: bold; border-top: 2px solid #555; border-bottom: 2px solid #555;">
+          ── 1 个月前 ▸ 展开 28 个对话 ──
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top: 20px;">
+      <h3>方案 C：树形结构</h3>
+      <p class="subtitle">类似文件浏览器，支持多级展开</p>
+
+      <div style="background: #1a1a2e; border: 1px solid #444; border-radius: 6px; padding: 0; margin-top: 12px; font-family: monospace; font-size: 13px;">
+        <div style="padding: 6px 12px; color: #8be9fd; cursor: pointer;">▾ 📁 今天</div>
+        <div style="padding: 6px 12px 6px 24px; border-bottom: 1px solid #333; color: #f8f8f2;">  修复登录 bug</div>
+        <div style="padding: 6px 12px 6px 24px; border-bottom: 1px solid #333; color: #f8f8f2;">  API 集成测试</div>
+
+        <div style="padding: 6px 12px; color: #8be9fd; cursor: pointer;">▾ 📁 3 天内</div>
+        <div style="padding: 6px 12px 6px 24px; border-bottom: 1px solid #333; color: #f8f8f2;">  数据库迁移方案</div>
+
+        <div style="padding: 6px 12px; color: #8be9fd; cursor: pointer;">▸ 📁 3-7 天 (5)</div>
+        <div style="padding: 6px 12px; color: #8be9fd; cursor: pointer;">▸ 📁 7 天 - 1 个月 (12)</div>
+        <div style="padding: 6px 12px; color: #8be9fd; cursor: pointer;">▸ 📁 1 个月以上 (28)</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="options" data-multiselect>
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>可折叠分组</h3>
+      <p>清晰的分组标题，点击展开/收起，近期对话默认展开</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>分隔线 + 折叠</h3>
+      <p>用分隔线区分时间段，远期对话自动折叠成一行</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>树形结构</h3>
+      <p>类似文件浏览器，文件夹图标 + 多级展开</p>
+    </div>
+  </div>
+</div>

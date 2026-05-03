@@ -7,7 +7,7 @@ import os
 # Add parent dir to path so we can import from hermes_dashboard
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hermes_dashboard import _parse_ago_to_hours
+from time_utils import parse_ago_to_hours as _parse_ago_to_hours
 
 
 class TestParseAgoToHours:
@@ -42,3 +42,9 @@ class TestParseAgoToHours:
 
     def test_none_input(self):
         assert _parse_ago_to_hours(None) is None
+
+    def test_case_insensitive(self):
+        assert _parse_ago_to_hours("2H AGO") == 2
+
+    def test_without_ago_suffix(self):
+        assert _parse_ago_to_hours("2h") == 2
