@@ -1,70 +1,72 @@
 """Session grouping logic tests."""
 
 import pytest
-import sys
-import os
 
-# Add parent dir to path so we can import from hermes_dashboard
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from time_utils import parse_ago_to_hours as _parse_ago_to_hours
+from time_utils import parse_ago_to_hours, SessionGroup, get_group_for_hours, GROUPS, GROUP_KEY_PREFIX
 
 
 class TestParseAgoToHours:
     """Tests for _parse_ago_to_hours function."""
 
     def test_just_now(self):
-        assert _parse_ago_to_hours("just now") == 0
+        assert parse_ago_to_hours("just now") == 0
 
     def test_minutes_ago(self):
-        assert _parse_ago_to_hours("30m ago") == 0  # < 1 hour → 0
+        assert parse_ago_to_hours("30m ago") == 0  # < 1 hour → 0
 
     def test_one_hour_ago(self):
-        assert _parse_ago_to_hours("1h ago") == 1
+        assert parse_ago_to_hours("1h ago") == 1
 
     def test_hours_ago(self):
-        assert _parse_ago_to_hours("5h ago") == 5
+        assert parse_ago_to_hours("5h ago") == 5
 
     def test_one_day_ago(self):
-        assert _parse_ago_to_hours("1d ago") == 24
+        assert parse_ago_to_hours("1d ago") == 24
 
     def test_days_ago(self):
-        assert _parse_ago_to_hours("3d ago") == 72
+        assert parse_ago_to_hours("3d ago") == 72
 
     def test_large_days_ago(self):
-        assert _parse_ago_to_hours("45d ago") == 1080
+        assert parse_ago_to_hours("45d ago") == 1080
 
     def test_invalid_format(self):
-        assert _parse_ago_to_hours("invalid") is None
+        assert parse_ago_to_hours("invalid") is None
 
     def test_empty_string(self):
-        assert _parse_ago_to_hours("") is None
+        assert parse_ago_to_hours("") is None
 
     def test_none_input(self):
-        assert _parse_ago_to_hours(None) is None
+        assert parse_ago_to_hours(None) is None
 
     def test_case_insensitive(self):
-        assert _parse_ago_to_hours("2H AGO") == 2
+        assert parse_ago_to_hours("2H AGO") == 2
 
     def test_without_ago_suffix(self):
-        assert _parse_ago_to_hours("2h") == 2
-
-
-from time_utils import SessionGroup, get_group_for_hours, GROUPS
+        assert parse_ago_to_hours("2h") == 2
 
 
 class TestSessionGrouping:
     """Tests for session group classification."""
 
     def test_groups_defined(self):
-        """Verify all expected groups exist."""
-        group_keys = [g.key for g in GROUPS]
-        assert "__group:today__" in group_keys
-        assert "__group:3days__" in group_keys
-        assert "__group:7days__" in group_keys
-        assert "__group:30days__" in group_keys
-        assert "__group:older__" in group_keys
-        assert "__group:unknown__" in group_keys
+        """Verify all expected groups exist and no extras."""
+        assert len(GROUPS) == 6
+        expected_keys = {
+            "__group:today__", "__group:3days__", "__group:7days__",
+            "__group:30days__", "__group:older__", "__group:unknown__"
+        }
+        actual_keys = {g.key for g in GROUPS}
+        assert actual_keys == expected_keys
+
+    def test_all_group_keys_have_prefix(self):
+        """Verify all group keys start with GROUP_KEY_PREFIX."""
+        for g in GROUPS:
+            assert g.key.startswith(GROUP_KEY_PREFIX)
+
+    def test_group_order_is_sequential(self):
+        """Verify groups have sequential order values 1-6."""
+        orders = [g.order for g in GROUPS]
+        assert orders == list(range(1, 7))
 
     def test_today_group_expanded_by_default(self):
         today = next(g for g in GROUPS if g.key == "__group:today__")
