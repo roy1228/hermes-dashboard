@@ -331,7 +331,7 @@ class SessionsPane(Vertical):
                 count = len(sessions_by_group[group.key])
                 icon = "▸" if is_collapsed else "▾"
                 header_label = f"{icon} {group.name}（{count} 个对话）"
-                table.add_row("", header_label, "", key=f"{GROUP_KEY_PREFIX}{group.key}")
+                table.add_row("", header_label, "", key=group.key)
 
                 if not is_collapsed:
                     for active_marker, display_name, ago, sid in sessions_by_group[group.key]:

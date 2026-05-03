@@ -131,3 +131,52 @@ class TestSessionGrouping:
     def test_get_group_unknown_none(self):
         g = get_group_for_hours(None)
         assert g.key == "__group:unknown__"
+
+
+class TestEndToEndScenarios:
+    """Integration-style tests for common scenarios."""
+
+    def test_parse_and_group_pipeline_just_now(self):
+        """just now → 0h → today group."""
+        hours = parse_ago_to_hours("just now")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:today__"
+
+    def test_parse_and_group_pipeline_30min(self):
+        """30m ago → 0h → today group."""
+        hours = parse_ago_to_hours("30m ago")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:today__"
+
+    def test_parse_and_group_pipeline_2days(self):
+        """2d ago → 48h → 3days group."""
+        hours = parse_ago_to_hours("2d ago")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:3days__"
+
+    def test_parse_and_group_pipeline_5days(self):
+        """5d ago → 120h → 7days group."""
+        hours = parse_ago_to_hours("5d ago")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:7days__"
+
+    def test_parse_and_group_pipeline_15days(self):
+        """15d ago → 360h → 30days group."""
+        hours = parse_ago_to_hours("15d ago")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:30days__"
+
+    def test_parse_and_group_pipeline_60days(self):
+        """60d ago → 1440h → older group."""
+        hours = parse_ago_to_hours("60d ago")
+        group = get_group_for_hours(hours)
+        assert group.key == "__group:older__"
+
+    def test_all_groups_have_sessions_in_default_state(self):
+        """Verify collapsed_groups set matches GROUPS default state."""
+        expected_collapsed = {
+            "__group:7days__", "__group:30days__",
+            "__group:older__", "__group:unknown__"
+        }
+        actual_collapsed = {g.key for g in GROUPS if not g.expanded}
+        assert actual_collapsed == expected_collapsed
