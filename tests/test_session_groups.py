@@ -48,3 +48,84 @@ class TestParseAgoToHours:
 
     def test_without_ago_suffix(self):
         assert _parse_ago_to_hours("2h") == 2
+
+
+from time_utils import SessionGroup, get_group_for_hours, GROUPS
+
+
+class TestSessionGrouping:
+    """Tests for session group classification."""
+
+    def test_groups_defined(self):
+        """Verify all expected groups exist."""
+        group_keys = [g.key for g in GROUPS]
+        assert "__group:today__" in group_keys
+        assert "__group:3days__" in group_keys
+        assert "__group:7days__" in group_keys
+        assert "__group:30days__" in group_keys
+        assert "__group:older__" in group_keys
+        assert "__group:unknown__" in group_keys
+
+    def test_today_group_expanded_by_default(self):
+        today = next(g for g in GROUPS if g.key == "__group:today__")
+        assert today.expanded is True
+
+    def test_3days_group_expanded_by_default(self):
+        g = next(g for g in GROUPS if g.key == "__group:3days__")
+        assert g.expanded is True
+
+    def test_7days_group_collapsed_by_default(self):
+        g = next(g for g in GROUPS if g.key == "__group:7days__")
+        assert g.expanded is False
+
+    def test_30days_group_collapsed_by_default(self):
+        g = next(g for g in GROUPS if g.key == "__group:30days__")
+        assert g.expanded is False
+
+    def test_older_group_collapsed_by_default(self):
+        g = next(g for g in GROUPS if g.key == "__group:older__")
+        assert g.expanded is False
+
+    def test_get_group_today_0h(self):
+        g = get_group_for_hours(0)
+        assert g.key == "__group:today__"
+
+    def test_get_group_today_23h(self):
+        g = get_group_for_hours(23)
+        assert g.key == "__group:today__"
+
+    def test_get_group_3days_24h(self):
+        g = get_group_for_hours(24)
+        assert g.key == "__group:3days__"
+
+    def test_get_group_3days_71h(self):
+        g = get_group_for_hours(71)
+        assert g.key == "__group:3days__"
+
+    def test_get_group_7days_72h(self):
+        g = get_group_for_hours(72)
+        assert g.key == "__group:7days__"
+
+    def test_get_group_7days_167h(self):
+        g = get_group_for_hours(167)
+        assert g.key == "__group:7days__"
+
+    def test_get_group_30days_168h(self):
+        g = get_group_for_hours(168)
+        assert g.key == "__group:30days__"
+
+    def test_get_group_30days_719h(self):
+        g = get_group_for_hours(719)
+        assert g.key == "__group:30days__"
+
+    def test_get_group_older_720h(self):
+        g = get_group_for_hours(720)
+        assert g.key == "__group:older__"
+
+    def test_get_group_older_1000h(self):
+        g = get_group_for_hours(1000)
+        assert g.key == "__group:older__"
+
+    def test_get_group_unknown_none(self):
+        g = get_group_for_hours(None)
+        assert g.key == "__group:unknown__"

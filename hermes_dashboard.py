@@ -93,7 +93,12 @@ def _copy_to_clipboard(text: str):
             continue
 
 
-from time_utils import parse_ago_to_hours as _parse_ago_to_hours
+from time_utils import (
+    parse_ago_to_hours as _parse_ago_to_hours,
+    get_group_for_hours as _get_group_for_hours,
+    GROUPS,
+    GROUP_KEY_PREFIX,
+)
 
 
 # ──────────────────────────────────────────────
