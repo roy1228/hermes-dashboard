@@ -289,7 +289,7 @@ class SessionsPane(Vertical):
         self.run_worker(self._fetch_sessions, exclusive=True)
 
     async def _fetch_sessions(self):
-        raw = hermes("sessions", "list", "--source", "cli", "--limit", "80", timeout=20)
+        raw = hermes("sessions", "list", "--limit", "200", timeout=20)
         table = self.query_one("#sess-table", DataTable)
         table.clear()
 
@@ -298,6 +298,9 @@ class SessionsPane(Vertical):
 
         for line in raw.strip().split("\n"):
             if not line.strip() or line.startswith("Title") or line.startswith("─"):
+                continue
+            # Skip cron-generated sessions
+            if "cron_" in line:
                 continue
             m = re.search(r'(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$', line)
             if not m:
@@ -447,11 +450,14 @@ class SessionsPane(Vertical):
     async def _search_sessions(self, q: str):
         self._search_mode = True
         safe_q = shlex.quote(q)
-        raw = await _shell_async(f"hermes sessions list --source cli --limit 80 2>/dev/null | grep -i {safe_q}", timeout=20)
+        raw = await _shell_async(f"hermes sessions list --limit 200 2>/dev/null | grep -i {safe_q}", timeout=20)
         table = self.query_one("#sess-table", DataTable)
         table.clear()
         for line in raw.strip().split("\n"):
             if not line.strip():
+                continue
+            # Skip cron-generated sessions
+            if "cron_" in line:
                 continue
             m = re.search(r'(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$', line)
             if not m:
