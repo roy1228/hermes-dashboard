@@ -25,8 +25,15 @@ from dataclasses import dataclass, field
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import (
-    Footer, Static, DataTable, Label, Button, Input,
-    TextArea, TabbedContent, TabPane
+    Footer,
+    Static,
+    DataTable,
+    Label,
+    Button,
+    Input,
+    TextArea,
+    TabbedContent,
+    TabPane,
 )
 from textual.binding import Binding
 from textual import work, on
@@ -37,11 +44,16 @@ from textual import work, on
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
 LOG_DIR = HERMES_HOME / "logs"
 
+
 def _run(args: list[str] | str, timeout: int = 15, shell: bool = False) -> str:
     """Run command, return stripped stdout."""
     try:
         r = subprocess.run(
-            args, shell=shell, capture_output=True, text=True, timeout=timeout,
+            args,
+            shell=shell,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
             env={**os.environ, "HERMES_HOME": str(HERMES_HOME)},
         )
         return (r.stdout or "").strip()
@@ -50,11 +62,14 @@ def _run(args: list[str] | str, timeout: int = 15, shell: bool = False) -> str:
     except Exception as e:
         return f"(error: {e})"
 
+
 def hermes(*args: str, timeout: int = 15) -> str:
     return _run(["hermes"] + list(args), timeout=timeout)
 
+
 def shell(cmd: str, timeout: int = 15) -> str:
     return _run(cmd, timeout=timeout, shell=True)
+
 
 async def _shell_async(cmd: str, timeout: int | None = None) -> str:
     try:
@@ -80,8 +95,44 @@ async def _shell_async(cmd: str, timeout: int | None = None) -> str:
     except Exception as e:
         return f"(error: {e})"
 
+
+async def _shell_async_stream(cmd: str, timeout: int | None = None):
+    """Async generator that yields stdout chunks as they arrive."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={
+                **os.environ,
+                "HERMES_HOME": str(HERMES_HOME),
+                "HERMES_YOLO_MODE": "1",
+            },
+        )
+        if proc.stdout is None:
+            return
+        while True:
+            if timeout is not None:
+                try:
+                    chunk = await asyncio.wait_for(
+                        proc.stdout.read(512), timeout=timeout
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    return
+            else:
+                chunk = await proc.stdout.read(512)
+            if not chunk:
+                break
+            yield chunk.decode()
+        await proc.wait()
+    except Exception:
+        return
+
+
 def _copy_to_clipboard(text: str):
     import base64
+
     encoded = base64.b64encode(text.encode()).decode()
     sys.stdout.write(f"\033]52;c;{encoded}\007")
     sys.stdout.flush()
@@ -165,10 +216,10 @@ class SessionsPane(Vertical):
         self._rename_target = None
         self._fullscreen = False
         # NEW: Collapsible group state
-        self._collapsed_groups: set[str] = {
-            g.key for g in GROUPS if not g.expanded
-        }
+        self._collapsed_groups: set[str] = {g.key for g in GROUPS if not g.expanded}
         self._search_mode = False
+        self._streaming_start_pos = None
+        self._streaming_content = ""
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -180,31 +231,31 @@ class SessionsPane(Vertical):
                     Button("搜", id="sess-search-btn", variant="primary"),
                     Button("删除", id="sess-delete-btn", variant="warning"),
                     Button("重命名", id="sess-rename-btn"),
-                    id="sess-search-bar"
+                    id="sess-search-bar",
                 ),
                 DataTable(id="sess-table"),
-                id="sess-left"
+                id="sess-left",
             ),
             Vertical(
                 Vertical(
                     Horizontal(
                         Static("", id="sess-chat-status"),
                         Button("◀ 列表", id="sess-fullscreen-btn"),
-                        id="sess-chat-status-row"
+                        id="sess-chat-status-row",
                     ),
                     Static("", id="sess-chat-loading-bar"),
-                    id="sess-chat-status-area"
+                    id="sess-chat-status-area",
                 ),
                 TextArea(id="sess-chat-feed", read_only=True, soft_wrap=True),
                 Horizontal(
                     TextArea(id="sess-chat-input", soft_wrap=True),
                     Button("发送", id="sess-chat-send", variant="primary"),
                     Button("复制恢复命令", id="sess-resume-btn", variant="warning"),
-                    id="sess-chat-bar"
+                    id="sess-chat-bar",
                 ),
-                id="sess-right"
+                id="sess-right",
             ),
-            id="sess-split-layout"
+            id="sess-split-layout",
         )
 
     def on_mount(self):
@@ -213,22 +264,29 @@ class SessionsPane(Vertical):
         table.zebra_stripes = True
         table.add_columns("", "会话", "时间")
         self.load_sessions()
-        
+
         log = self.query_one("#sess-chat-feed", TextArea)
         log.load_text("← 选中左侧会话查看历史\n鼠标拖拽选中文本 → Ctrl+C 复制\n")
-        
+
         try:
             self._stop_loading_bar()
         except Exception:
             pass
 
-    def _add_chat_message(self, role: str, content: str, tool_name: str | None = None):
+    def _add_chat_message(
+        self,
+        role: str,
+        content: str,
+        tool_name: str | None = None,
+        is_meta: bool = False,
+    ):
         log = self.query_one("#sess-chat-feed", TextArea)
         if role == "user":
             log.text += f"\n▸ 你: {content}\n"
         elif role == "assistant":
             log.text += f"\n◂ AI:\n{content}\n"
-            self._last_response = content
+            if not is_meta:
+                self._last_response = content
         elif role == "tool":
             name = tool_name or "工具"
             first_line = content.split("\n")[0].strip()[:120]
@@ -238,6 +296,31 @@ class SessionsPane(Vertical):
             else:
                 log.text += f"\n  🔧 {name}: {first_line}\n"
         log.cursor_position = len(log.text)
+
+    def _start_streaming_ai_message(self):
+        log = self.query_one("#sess-chat-feed", TextArea)
+        header = f"\n◂ AI:\n"
+        log.text += header
+        self._streaming_start_pos = len(log.text)
+        self._streaming_content = ""
+        log.cursor_position = len(log.text)
+
+    def _append_to_streaming_message(self, chunk: str):
+        if self._streaming_start_pos is None:
+            return
+        log = self.query_one("#sess-chat-feed", TextArea)
+        self._streaming_content += chunk
+        full_text = log.text
+        log.text = full_text[: self._streaming_start_pos] + self._streaming_content
+        log.cursor_position = len(log.text)
+
+    def _finish_streaming_ai_message(self) -> str:
+        content = self._streaming_content
+        self._streaming_start_pos = None
+        self._streaming_content = ""
+        self._last_response = content
+        return content
+
     def _start_loading_bar(self):
         if self._loading_bar_timer:
             self._loading_bar_timer.stop()
@@ -302,19 +385,25 @@ class SessionsPane(Vertical):
             # Skip cron-generated sessions
             if "cron_" in line:
                 continue
-            m = re.search(r'(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$', line)
+            m = re.search(r"(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$", line)
             if not m:
                 continue
             sid = m.group(1)
-            before = line[:m.start()].rstrip()
-            m2 = re.search(r'(\d+[mhd]\s+ago|just\s+now)\s*$', before)
+            before = line[: m.start()].rstrip()
+            m2 = re.search(r"(\d+[mhd]\s+ago|just\s+now)\s*$", before)
             ago = m2.group(1) if m2 else ""
             title = line[:32].strip()
-            title = re.sub(r'\s{2,}', ' ', title)
+            title = re.sub(r"\s{2,}", " ", title)
             preview_start = 32
             preview_end = before.rfind(ago) - 1 if ago and m2 else len(before)
-            preview = line[preview_start:max(preview_end, preview_start)].strip() if preview_end > preview_start else ""
-            display_name = preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
+            preview = (
+                line[preview_start : max(preview_end, preview_start)].strip()
+                if preview_end > preview_start
+                else ""
+            )
+            display_name = (
+                preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
+            )
 
             hours = _parse_ago_to_hours(ago)
             group = _get_group_for_hours(hours)
@@ -325,7 +414,9 @@ class SessionsPane(Vertical):
         if self._search_mode:
             # Search mode: flat list, no group headers
             for group in GROUPS:
-                for active_marker, display_name, ago, sid in sessions_by_group[group.key]:
+                for active_marker, display_name, ago, sid in sessions_by_group[
+                    group.key
+                ]:
                     table.add_row(active_marker, display_name, ago, key=sid)
         else:
             # Normal mode: group headers + sessions
@@ -337,7 +428,9 @@ class SessionsPane(Vertical):
                 table.add_row("", header_label, "", key=group.key)
 
                 if not is_collapsed:
-                    for active_marker, display_name, ago, sid in sessions_by_group[group.key]:
+                    for active_marker, display_name, ago, sid in sessions_by_group[
+                        group.key
+                    ]:
                         table.add_row(active_marker, display_name, ago, key=sid)
 
     def _selected_sid(self) -> str | None:
@@ -364,14 +457,15 @@ class SessionsPane(Vertical):
         self._is_new_conv = True
         self._active_session_id = None
 
-        self._add_chat_message("assistant",
+        self._add_chat_message(
+            "assistant",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "💬 新对话 (Agent 模式)\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "输入第一条消息，将启动完整 Agent 流程\n"
-            "(加载 Memory、Skills、Tools，自动保存)"
+            "(加载 Memory、Skills、Tools，自动保存)",
         )
-        
+
         inp = self.query_one("#sess-chat-input", TextArea)
         inp.read_only = False
         try:
@@ -398,7 +492,9 @@ class SessionsPane(Vertical):
                 if sid:
                     _copy_to_clipboard(f"hermes --resume {sid}")
                     s = self.query_one("#sess-chat-status", Static)
-                    s.update("[bold bright_cyan]📋 命令已复制到剪贴板[/bold bright_cyan]")
+                    s.update(
+                        "[bold bright_cyan]📋 命令已复制到剪贴板[/bold bright_cyan]"
+                    )
                     self.set_timer(2, lambda: s.update(""))
             case "sess-delete-btn":
                 if sid:
@@ -450,7 +546,10 @@ class SessionsPane(Vertical):
     async def _search_sessions(self, q: str):
         self._search_mode = True
         safe_q = shlex.quote(q)
-        raw = await _shell_async(f"hermes sessions list --limit 200 2>/dev/null | grep -i {safe_q}", timeout=20)
+        raw = await _shell_async(
+            f"hermes sessions list --limit 200 2>/dev/null | grep -i {safe_q}",
+            timeout=20,
+        )
         table = self.query_one("#sess-table", DataTable)
         table.clear()
         for line in raw.strip().split("\n"):
@@ -459,17 +558,21 @@ class SessionsPane(Vertical):
             # Skip cron-generated sessions
             if "cron_" in line:
                 continue
-            m = re.search(r'(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$', line)
+            m = re.search(r"(\d{8}_\d{6}_[0-9a-f]+|[0-9a-f]{12,})\s*$", line)
             if not m:
                 continue
             sid = m.group(1)
             title = line[:32].strip()
-            before = line[:m.start()].rstrip()
-            m2 = re.search(r'(\d+[mhd]\s+ago|just\s+now)\s*$', before)
+            before = line[: m.start()].rstrip()
+            m2 = re.search(r"(\d+[mhd]\s+ago|just\s+now)\s*$", before)
             ago = m2.group(1) if m2 else ""
             preview_end = before.rfind(ago) - 1 if ago and m2 else 0
-            preview = line[32:max(preview_end, 32)].strip() if preview_end > 32 else ""
-            display_name = preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
+            preview = (
+                line[32 : max(preview_end, 32)].strip() if preview_end > 32 else ""
+            )
+            display_name = (
+                preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
+            )
             active_marker = "◀" if sid == self._active_session_id else " "
             table.add_row(active_marker, display_name, ago, key=sid)
 
@@ -508,7 +611,9 @@ class SessionsPane(Vertical):
         log = self.query_one("#sess-chat-feed", TextArea)
         log.load_text("")
 
-        raw = await _shell_async(f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25)
+        raw = await _shell_async(
+            f"hermes sessions export --session-id {sid} - 2>/dev/null", timeout=25
+        )
         if not raw:
             log.text = "无法获取会话内容"
             return
@@ -555,12 +660,12 @@ class SessionsPane(Vertical):
         if not msg:
             return
         inp.clear()
-        
+
         status = self.query_one("#sess-chat-status", Static)
         self._add_chat_message("user", msg)
         self._start_loading_bar()
         inp.read_only = True
-        
+
         # 核心逻辑：如果有 active_id 就继续，否则新建
         if self._active_session_id:
             status.update("[bold yellow]💬 继续会话中...[/bold yellow]")
@@ -576,24 +681,31 @@ class SessionsPane(Vertical):
         safe_msg = shlex.quote(msg)
         cmd = f"hermes chat -q {safe_msg} -Q 2>&1"
 
-        raw = await _shell_async(cmd)
-        if raw.startswith("(timeout)") or raw.startswith("(error:"):
-            self._add_chat_message("assistant", f"[red]请求超时或错误: {raw}[/red]")
+        self._start_streaming_ai_message()
+        full_output = ""
+        async for chunk in _shell_async_stream(cmd):
+            full_output += chunk
+            self._append_to_streaming_message(chunk)
+
+        if full_output.startswith("(timeout)") or full_output.startswith("(error:"):
+            self._append_to_streaming_message(
+                f"\n[red]请求超时或错误: {full_output}[/red]"
+            )
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
             inp.read_only = False
             return
-        
-        session_id, cleaned = self._parse_chat_output(raw)
 
-        if cleaned:
-            self._add_chat_message("assistant", cleaned)
+        session_id, cleaned = self._parse_chat_output(full_output)
+        self._finish_streaming_ai_message()
 
         if session_id:
             self._active_session_id = session_id
             self._is_new_conv = False
-            self._add_chat_message("assistant", f"[dim]🔗 会话: {session_id}[/dim]")
+            self._add_chat_message(
+                "assistant", f"[dim]🔗 会话: {session_id}[/dim]", is_meta=True
+            )
             self.load_sessions()
 
         self._stop_loading_bar()
@@ -609,19 +721,24 @@ class SessionsPane(Vertical):
         safe_sid = shlex.quote(sid)
         cmd = f"hermes chat -r {safe_sid} -q {safe_msg} -Q 2>&1"
 
-        raw = await _shell_async(cmd)
-        if raw.startswith("(timeout)") or raw.startswith("(error:"):
-            self._add_chat_message("assistant", f"[red]请求超时或错误: {raw}[/red]")
+        self._start_streaming_ai_message()
+        full_output = ""
+        async for chunk in _shell_async_stream(cmd):
+            full_output += chunk
+            self._append_to_streaming_message(chunk)
+
+        if full_output.startswith("(timeout)") or full_output.startswith("(error:"):
+            self._append_to_streaming_message(
+                f"\n[red]请求超时或错误: {full_output}[/red]"
+            )
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
             inp.read_only = False
             return
-        
-        session_id, cleaned = self._parse_chat_output(raw)
 
-        if cleaned:
-            self._add_chat_message("assistant", cleaned)
+        session_id, cleaned = self._parse_chat_output(full_output)
+        self._finish_streaming_ai_message()
 
         if session_id:
             self._active_session_id = session_id
@@ -633,7 +750,7 @@ class SessionsPane(Vertical):
 
     def _parse_chat_output(self, raw: str) -> tuple[str | None, str]:
         """Parse hermes chat -Q output: (session_id, clean_response).
-        
+
         -Q output: [↻ Resumed session <sid> (...)\n]\n
                     session_id: <sid>\n
                     <clean response>
@@ -737,7 +854,7 @@ class CronsPane(Vertical):
             Button("手动触发", id="cron-run", variant="success"),
             Button("暂停", id="cron-pause"),
             Button("恢复", id="cron-resume"),
-            id="cron-toolbar"
+            id="cron-toolbar",
         )
         yield DataTable(id="cron-table")
         yield Static("", id="cron-detail")
@@ -771,7 +888,10 @@ class CronsPane(Vertical):
                 current = {
                     "job_id": parts[0],
                     "status": parts[1].strip("[]") if len(parts) > 1 else "unknown",
-                    "name": "", "schedule": "", "next": "", "skills": ""
+                    "name": "",
+                    "schedule": "",
+                    "next": "",
+                    "skills": "",
                 }
             elif s.startswith("Name:"):
                 current["name"] = s.split(":", 1)[1].strip()
@@ -786,7 +906,9 @@ class CronsPane(Vertical):
 
         for job in jobs:
             s = job.get("status", "")
-            icon = {"active": "[green]●[/green]", "paused": "[yellow]●[/yellow]"}.get(s, "[red]●[/red]")
+            icon = {"active": "[green]●[/green]", "paused": "[yellow]●[/yellow]"}.get(
+                s, "[red]●[/red]"
+            )
             table.add_row(
                 job["job_id"][:12],
                 job["name"],
@@ -794,7 +916,7 @@ class CronsPane(Vertical):
                 job["schedule"],
                 job["next"],
                 job["skills"],
-                key=job["job_id"]
+                key=job["job_id"],
             )
 
     def _selected_job_id(self) -> str | None:
@@ -891,6 +1013,7 @@ class CronsPane(Vertical):
 # ──────────────────────────────────────────────
 ENV_PATH = HERMES_HOME / ".env"
 
+
 def _mask_value(val: str, key: str) -> str:
     """Mask sensitive values."""
     sensitive = ["KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "AUTH"]
@@ -900,6 +1023,7 @@ def _mask_value(val: str, key: str) -> str:
         return "***" if val else "(empty)"
     return val
 
+
 def _parse_env(path: Path) -> list[dict]:
     """Parse .env file into list of {key, value, comment, raw}."""
     entries = []
@@ -908,12 +1032,29 @@ def _parse_env(path: Path) -> list[dict]:
     for line in path.read_text().splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
-            entries.append({"raw": line, "key": "", "value": "", "comment": stripped, "is_comment": True})
+            entries.append(
+                {
+                    "raw": line,
+                    "key": "",
+                    "value": "",
+                    "comment": stripped,
+                    "is_comment": True,
+                }
+            )
             continue
         if "=" in stripped:
             k, v = stripped.split("=", 1)
-            entries.append({"raw": line, "key": k.strip(), "value": v.strip(), "comment": "", "is_comment": False})
+            entries.append(
+                {
+                    "raw": line,
+                    "key": k.strip(),
+                    "value": v.strip(),
+                    "comment": "",
+                    "is_comment": False,
+                }
+            )
     return entries
+
 
 def _write_env(path: Path, entries: list[dict]):
     """Write entries back to .env file."""
@@ -939,7 +1080,7 @@ class EnvPane(Vertical):
             Button("添加", id="env-add", variant="success"),
             Button("编辑", id="env-edit"),
             Button("删除", id="env-delete", variant="warning"),
-            id="env-toolbar"
+            id="env-toolbar",
         )
         yield DataTable(id="env-table")
         yield Static("", id="env-detail")
@@ -998,8 +1139,7 @@ class EnvPane(Vertical):
                 self._editing_key = None
                 inp.value = ""
                 detail.update(
-                    "[bold]添加环境变量[/bold]\n"
-                    "在下方输入 KEY=VALUE 后按 Enter 保存"
+                    "[bold]添加环境变量[/bold]\n在下方输入 KEY=VALUE 后按 Enter 保存"
                 )
                 inp.focus()
             case "env-edit":
@@ -1038,7 +1178,9 @@ class EnvPane(Vertical):
         if self._editing_key:
             self._entries = [e for e in self._entries if e["key"] != self._editing_key]
         self._entries = [e for e in self._entries if e["key"] != key]
-        self._entries.append({"key": key, "value": value, "comment": "", "is_comment": False})
+        self._entries.append(
+            {"key": key, "value": value, "comment": "", "is_comment": False}
+        )
         self._editing_key = None
         _write_env(ENV_PATH, self._entries)
         self._reload_table()
@@ -1079,7 +1221,7 @@ class LogsPane(Vertical):
             Button("Gateway", id="log-gateway"),
             Button("WebUI", id="log-webui"),
             Button("自动刷新: 关", id="log-autorefresh", variant="default"),
-            id="log-toolbar"
+            id="log-toolbar",
         )
         yield TextArea(id="log-viewer", language=None, read_only=True)
 
@@ -1102,7 +1244,9 @@ class LogsPane(Vertical):
                 btn.label = f"自动刷新: {'开' if self._autorefresh else '关'}"
                 btn.variant = "success" if self._autorefresh else "default"
                 if self._autorefresh:
-                    self._refresh_timer = self.set_interval(5, lambda: self._load_log(self._current_log))
+                    self._refresh_timer = self.set_interval(
+                        5, lambda: self._load_log(self._current_log)
+                    )
                 elif self._refresh_timer:
                     self._refresh_timer.stop()
                     self._refresh_timer = None
@@ -1289,6 +1433,7 @@ class HermesDashboard(App):
                 return
             except Exception:
                 pass
+
 
 if __name__ == "__main__":
     app = HermesDashboard()
