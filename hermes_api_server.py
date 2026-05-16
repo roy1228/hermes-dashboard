@@ -159,9 +159,9 @@ def _parse_ago_to_hours(ago: str | None) -> int | None:
 
 GROUPS = [
     ("今天（24h 内）", lambda h: h is not None and h < 24, 0),
-    ("3 天内", lambda h: 24 <= h < 72, 1),
-    ("3-7 天", lambda h: 72 <= h < 168, 2),
-    ("7 天-1 个月", lambda h: 168 <= h < 720, 3),
+    ("3 天内", lambda h: h is not None and 24 <= h < 72, 1),
+    ("3-7 天", lambda h: h is not None and 72 <= h < 168, 2),
+    ("7 天-1 个月", lambda h: h is not None and 168 <= h < 720, 3),
     ("1 个月以上", lambda h: h is not None and h >= 720, 4),
     ("未知时间", lambda h: True, 5),
 ]
