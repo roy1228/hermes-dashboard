@@ -1,4 +1,8 @@
-"""Tests for PerfPane metrics collection."""
+"""Prerequisite smoke tests for psutil and deque, used by PerfPane.
+
+These tests verify that the third-party libraries PerfPane depends on
+return usable data on this system. They do not test PerfPane itself.
+"""
 
 import psutil
 from collections import deque
