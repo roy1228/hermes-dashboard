@@ -1520,7 +1520,9 @@ class HermesDashboard(App):
             elif pane.id == "tab-logs":
                 pass
             elif pane.id == "tab-perf":
-                pass
+                for pp in self.query(PerfPane):
+                    if pp.display:
+                        pp._start_monitoring()
         except Exception:
             pass
 
@@ -1536,6 +1538,9 @@ class HermesDashboard(App):
             for cp in self.query(CronsPane):
                 if cp.display:
                     cp.load_crons()
+            for pp in self.query(PerfPane):
+                if pp.display:
+                    pp._start_monitoring()
         except Exception:
             pass
 
