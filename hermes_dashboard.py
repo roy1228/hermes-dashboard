@@ -1297,6 +1297,7 @@ class PerfPane(Vertical):
         self._net_down_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
         self._prev_net = None
         self._prev_time = None
+        self._monitoring_active = False
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 系统性能 ━━━[/bold cyan]")
@@ -1311,19 +1312,25 @@ class PerfPane(Vertical):
         yield Sparkline([], id="perf-net-down-spark")
 
     def on_mount(self):
-        self._start_monitoring()
+        self.start_monitoring()
 
-    def _start_monitoring(self):
+    def start_monitoring(self):
+        if self._monitoring_active:
+            return
+        self._monitoring_active = True
         self.run_worker(self._monitor_loop, exclusive=True)
 
     async def _monitor_loop(self):
         """定时采集循环，Tab 不可见时自动退出。"""
-        while self.display:
-            try:
-                self._collect_metrics()
-            except Exception:
-                pass
-            await asyncio.sleep(self.INTERVAL)
+        try:
+            while self.display:
+                try:
+                    self._collect_metrics()
+                except Exception:
+                    pass
+                await asyncio.sleep(self.INTERVAL)
+        finally:
+            self._monitoring_active = False
 
     def _collect_metrics(self):
         """采集所有指标并更新 UI。"""
@@ -1468,11 +1475,10 @@ class HermesDashboard(App):
     #tab-logs { height: 1fr; }
     #tab-perf { height: 1fr; }
     PerfPane { height: 1fr; }
-    #perf-cpu-spark { height: 3; margin: 0 2 1 2; }
-    #perf-mem-spark { height: 3; margin: 0 2 1 2; }
-    #perf-disk-spark { height: 3; margin: 0 2 1 2; }
-    #perf-net-up-spark { height: 3; margin: 0 2 1 2; }
-    #perf-net-down-spark { height: 3; margin: 0 2 1 2; }
+    #perf-cpu-spark, #perf-mem-spark, #perf-disk-spark, #perf-net-up-spark, #perf-net-down-spark {
+        height: 3;
+        margin: 0 2 1 2;
+    }
     """
 
     BINDINGS = [
@@ -1522,7 +1528,7 @@ class HermesDashboard(App):
             elif pane.id == "tab-perf":
                 for pp in self.query(PerfPane):
                     if pp.display:
-                        pp._start_monitoring()
+                        pp.start_monitoring()
         except Exception:
             pass
 
@@ -1540,7 +1546,7 @@ class HermesDashboard(App):
                     cp.load_crons()
             for pp in self.query(PerfPane):
                 if pp.display:
-                    pp._start_monitoring()
+                    pp.start_monitoring()
         except Exception:
             pass
 
