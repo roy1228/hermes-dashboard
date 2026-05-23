@@ -19,8 +19,11 @@ import json
 import os
 import shlex
 import re
+import time
+import psutil
 from pathlib import Path
 from dataclasses import dataclass, field
+from collections import deque
 
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, Horizontal
@@ -34,6 +37,7 @@ from textual.widgets import (
     TextArea,
     TabbedContent,
     TabPane,
+    Sparkline,
 )
 from textual.binding import Binding
 from textual import work, on
@@ -1276,6 +1280,111 @@ class LogsPane(Vertical):
 
 
 # ──────────────────────────────────────────────
+# 性能监控面板
+# ──────────────────────────────────────────────
+class PerfPane(Vertical):
+    """实时性能监控：CPU、内存、磁盘、网络 I/O + Sparkline 趋势。"""
+
+    HISTORY_LEN = 30
+    INTERVAL = 5
+
+    def __init__(self):
+        super().__init__()
+        self._cpu_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
+        self._mem_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
+        self._disk_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
+        self._net_up_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
+        self._net_down_history: deque[float] = deque(maxlen=self.HISTORY_LEN)
+        self._prev_net = None
+        self._prev_time = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("[bold cyan]━━━ 系统性能 ━━━[/bold cyan]")
+        yield Label("", id="perf-cpu-label")
+        yield Sparkline([], id="perf-cpu-spark")
+        yield Label("", id="perf-mem-label")
+        yield Sparkline([], id="perf-mem-spark")
+        yield Label("", id="perf-disk-label")
+        yield Sparkline([], id="perf-disk-spark")
+        yield Label("", id="perf-net-label")
+        yield Sparkline([], id="perf-net-up-spark")
+        yield Sparkline([], id="perf-net-down-spark")
+
+    def on_mount(self):
+        self._start_monitoring()
+
+    def _start_monitoring(self):
+        self.run_worker(self._monitor_loop, exclusive=True)
+
+    async def _monitor_loop(self):
+        """定时采集循环，Tab 不可见时自动退出。"""
+        while self.display:
+            try:
+                self._collect_metrics()
+            except Exception:
+                pass
+            await asyncio.sleep(self.INTERVAL)
+
+    def _collect_metrics(self):
+        """采集所有指标并更新 UI。"""
+        # CPU
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+        self._cpu_history.append(cpu_pct)
+        cpu_cores = psutil.cpu_count()
+        cpu_label = self.query_one("#perf-cpu-label", Label)
+        cpu_label.update(f"  [bold]CPU:[/bold]  {cpu_pct:.1f}%  ({cpu_cores} cores)")
+        cpu_spark = self.query_one("#perf-cpu-spark", Sparkline)
+        cpu_spark.data = list(self._cpu_history)
+
+        # Memory
+        mem = psutil.virtual_memory()
+        mem_gb_used = mem.used / (1024**3)
+        mem_gb_total = mem.total / (1024**3)
+        self._mem_history.append(mem.percent)
+        mem_label = self.query_one("#perf-mem-label", Label)
+        mem_label.update(
+            f"  [bold]内存:[/bold]  {mem_gb_used:.1f} / {mem_gb_total:.1f} GB ({mem.percent:.1f}%)"
+        )
+        mem_spark = self.query_one("#perf-mem-spark", Sparkline)
+        mem_spark.data = list(self._mem_history)
+
+        # Disk
+        disk = psutil.disk_usage("/")
+        disk_gb_used = disk.used / (1024**3)
+        disk_gb_total = disk.total / (1024**3)
+        self._disk_history.append(disk.percent)
+        disk_label = self.query_one("#perf-disk-label", Label)
+        disk_label.update(
+            f"  [bold]磁盘:[/bold]  {disk_gb_used:.0f} / {disk_gb_total:.0f} GB ({disk.percent:.1f}%)"
+        )
+        disk_spark = self.query_one("#perf-disk-spark", Sparkline)
+        disk_spark.data = list(self._disk_history)
+
+        # Network I/O (rate since last sample)
+        now = time.time()
+        net = psutil.net_io_counters()
+        if self._prev_net is not None and self._prev_time is not None:
+            dt = now - self._prev_time
+            if dt > 0:
+                up_kbs = (net.bytes_sent - self._prev_net.bytes_sent) / dt / 1024
+                down_kbs = (net.bytes_recv - self._prev_net.bytes_recv) / dt / 1024
+                up_kbs = max(0, up_kbs)
+                down_kbs = max(0, down_kbs)
+                self._net_up_history.append(up_kbs)
+                self._net_down_history.append(down_kbs)
+                net_label = self.query_one("#perf-net-label", Label)
+                net_label.update(
+                    f"  [bold]网络:[/bold]  ↑{up_kbs:.1f} KB/s  ↓{down_kbs:.1f} KB/s"
+                )
+                spark_up = self.query_one("#perf-net-up-spark", Sparkline)
+                spark_up.data = list(self._net_up_history)
+                spark_down = self.query_one("#perf-net-down-spark", Sparkline)
+                spark_down.data = list(self._net_down_history)
+        self._prev_net = net
+        self._prev_time = now
+
+
+# ──────────────────────────────────────────────
 # 主 App
 # ──────────────────────────────────────────────
 class HermesDashboard(App):
@@ -1357,6 +1466,13 @@ class HermesDashboard(App):
     #tab-crons { height: 1fr; }
     #tab-env { height: 1fr; }
     #tab-logs { height: 1fr; }
+    #tab-perf { height: 1fr; }
+    PerfPane { height: 1fr; }
+    #perf-cpu-spark { height: 3; margin: 0 2 1 2; }
+    #perf-mem-spark { height: 3; margin: 0 2 1 2; }
+    #perf-disk-spark { height: 3; margin: 0 2 1 2; }
+    #perf-net-up-spark { height: 3; margin: 0 2 1 2; }
+    #perf-net-down-spark { height: 3; margin: 0 2 1 2; }
     """
 
     BINDINGS = [
@@ -1368,6 +1484,7 @@ class HermesDashboard(App):
         Binding("3", "switch_tab('tab-crons')", "任务"),
         Binding("4", "switch_tab('tab-env')", "环境"),
         Binding("5", "switch_tab('tab-logs')", "日志"),
+        Binding("6", "switch_tab('tab-perf')", "性能"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -1377,6 +1494,7 @@ class HermesDashboard(App):
             yield TabPane("任务", CronsPane(), id="tab-crons")
             yield TabPane("环境变量", EnvPane(), id="tab-env")
             yield TabPane("日志", LogsPane(), id="tab-logs")
+            yield TabPane("性能", PerfPane(), id="tab-perf")
         yield Footer()
 
     @on(TabbedContent.TabActivated)
@@ -1400,6 +1518,8 @@ class HermesDashboard(App):
                     if ep.display:
                         ep.load_env()
             elif pane.id == "tab-logs":
+                pass
+            elif pane.id == "tab-perf":
                 pass
         except Exception:
             pass
