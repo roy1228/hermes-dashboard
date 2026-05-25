@@ -1434,7 +1434,7 @@ class HermesDashboard(App):
         height: 1fr;
         background: $surface;
         border: solid $primary 50%;
-        scrollbar-size: 0 0;
+        scrollbar-size: 1 0;
     }
     #sess-chat-status-area {
         height: 3;
