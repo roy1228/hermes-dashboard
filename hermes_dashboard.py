@@ -270,6 +270,7 @@ class SessionsPane(Vertical):
         self.load_sessions()
 
         log = self.query_one("#sess-chat-feed", TextArea)
+        log.show_vertical_scrollbar = True
         log.load_text("← 选中左侧会话查看历史\n鼠标拖拽选中文本 → Ctrl+C 复制\n")
 
         try:
@@ -513,7 +514,7 @@ class SessionsPane(Vertical):
                 self._toggle_fullscreen()
 
     def on_key(self, event):
-        if event.key == "enter" and event.ctrl:
+        if event.key == "ctrl+enter":
             return  # Ctrl+Enter → let TextArea handle (newline)
         if event.key == "enter":
             focused = self.focused
@@ -1438,7 +1439,7 @@ class HermesDashboard(App):
         height: 1fr;
         background: $surface;
         border: solid $primary 50%;
-        scrollbar-size: 1 0;
+        scrollbar-size: 0 1;
     }
     #sess-chat-status-area {
         height: 3;
