@@ -300,6 +300,7 @@ class SessionsPane(Vertical):
             else:
                 log.text += f"\n  🔧 {name}: {first_line}\n"
         log.cursor_position = len(log.text)
+        log.scroll_end()
 
     def _start_streaming_ai_message(self):
         log = self.query_one("#sess-chat-feed", TextArea)
@@ -308,6 +309,7 @@ class SessionsPane(Vertical):
         self._streaming_start_pos = len(log.text)
         self._streaming_content = ""
         log.cursor_position = len(log.text)
+        log.scroll_end()
 
     def _append_to_streaming_message(self, chunk: str):
         if self._streaming_start_pos is None:
@@ -317,6 +319,7 @@ class SessionsPane(Vertical):
         full_text = log.text
         log.text = full_text[: self._streaming_start_pos] + self._streaming_content
         log.cursor_position = len(log.text)
+        log.scroll_end()
 
     def _finish_streaming_ai_message(self) -> str:
         content = self._streaming_content
@@ -605,6 +608,7 @@ class SessionsPane(Vertical):
         self._active_session_id = sid
         log = self.query_one("#sess-chat-feed", TextArea)
         log.load_text("正在加载历史消息...\n")
+        log.scroll_end()
         status = self.query_one("#sess-chat-status", Static)
         status.update("[dim]⏳ 加载中...[/dim]")
         inp = self.query_one("#sess-chat-input", TextArea)
