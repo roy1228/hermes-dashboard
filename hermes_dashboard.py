@@ -434,7 +434,12 @@ class SessionsPane(Vertical):
 
             hours = _parse_ago_to_hours(ago)
             group = _get_group_for_hours(hours)
-            active_marker = "◀" if sid == self._active_session_id else " "
+            if sid in self._running_sessions:
+                active_marker = "●"
+            elif sid == self._active_session_id:
+                active_marker = "◀"
+            else:
+                active_marker = " "
             sessions_by_group[group.key].append((active_marker, display_name, ago, sid))
 
         # Render groups and their sessions
@@ -600,7 +605,12 @@ class SessionsPane(Vertical):
             display_name = (
                 preview[:40] if title in ("—", "None", "") or len(title) < 2 else title
             )
-            active_marker = "◀" if sid == self._active_session_id else " "
+            if sid in self._running_sessions:
+                active_marker = "●"
+            elif sid == self._active_session_id:
+                active_marker = "◀"
+            else:
+                active_marker = " "
             table.add_row(active_marker, display_name, ago, key=sid)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
