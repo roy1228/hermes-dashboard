@@ -281,6 +281,9 @@ class SessionsPane(Vertical):
         except Exception:
             pass
 
+    def on_unmount(self) -> None:
+        self._stop_auto_refresh()
+
     def _add_chat_message(
         self,
         role: str,
