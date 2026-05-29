@@ -379,8 +379,15 @@ class SessionsPane(Vertical):
             pass
 
     def _maybe_start_auto_refresh(self):
-        """Auto-refresh stub; implemented in Task 2."""
-        pass
+        """如果有运行中的会话，启动定时刷新。"""
+        if self._running_sessions and not self._auto_refresh_timer:
+            self._auto_refresh_timer = self.set_interval(10, self.load_sessions)
+
+    def _stop_auto_refresh(self):
+        """停止定时刷新。"""
+        if self._auto_refresh_timer:
+            self._auto_refresh_timer.stop()
+            self._auto_refresh_timer = None
 
     def load_sessions(self):
         self._search_mode = False
