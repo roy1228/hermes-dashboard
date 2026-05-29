@@ -379,9 +379,11 @@ class SessionsPane(Vertical):
             pass
 
     def _maybe_start_auto_refresh(self):
-        """如果有运行中的会话，启动定时刷新。"""
+        """如果有运行中的会话，启动定时刷新；否则停止。"""
         if self._running_sessions and not self._auto_refresh_timer:
             self._auto_refresh_timer = self.set_interval(10, self.load_sessions)
+        elif not self._running_sessions:
+            self._stop_auto_refresh()
 
     def _stop_auto_refresh(self):
         """停止定时刷新。"""
