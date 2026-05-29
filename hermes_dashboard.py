@@ -224,6 +224,9 @@ class SessionsPane(Vertical):
         self._search_mode = False
         self._streaming_start_pos = None
         self._streaming_content = ""
+        self._running_sessions: set[str] = set()
+        self._streaming_session_id: str | None = None
+        self._auto_refresh_timer = None
 
     def compose(self) -> ComposeResult:
         yield Label("[bold cyan]━━━ 会话管理 ━━━[/bold cyan]")
@@ -374,6 +377,10 @@ class SessionsPane(Vertical):
             self.query_one("#sess-chat-loading-bar", Static).update("")
         except Exception:
             pass
+
+    def _maybe_start_auto_refresh(self):
+        """Auto-refresh stub; implemented in Task 2."""
+        pass
 
     def load_sessions(self):
         self._search_mode = False
@@ -690,6 +697,8 @@ class SessionsPane(Vertical):
         safe_msg = shlex.quote(msg)
         cmd = f"hermes chat -q {safe_msg} -Q 2>&1"
 
+        self._streaming_session_id = None  # 新会话，ID 未知
+        self._running_sessions.add("pending")
         self._start_streaming_ai_message()
         full_output = ""
         async for chunk in _shell_async_stream(cmd):
@@ -703,6 +712,7 @@ class SessionsPane(Vertical):
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
+            self._running_sessions.discard("pending")
             inp.read_only = False
             return
 
@@ -712,6 +722,9 @@ class SessionsPane(Vertical):
         if session_id:
             self._active_session_id = session_id
             self._is_new_conv = False
+            self._streaming_session_id = session_id
+            self._running_sessions.discard("pending")
+            self._running_sessions.add(session_id)
             self._add_chat_message(
                 "assistant", f"[dim]🔗 会话: {session_id}[/dim]", is_meta=True
             )
@@ -720,6 +733,11 @@ class SessionsPane(Vertical):
         self._stop_loading_bar()
         status.update("[bold green]✅ 完成[/bold green]")
         self.set_timer(3, lambda: status.update(""))
+        self._running_sessions.discard("pending")
+        if self._streaming_session_id:
+            self._running_sessions.discard(self._streaming_session_id)
+            self._streaming_session_id = None
+        self._maybe_start_auto_refresh()
         inp.read_only = False
 
     async def _do_resume_session(self, sid: str, msg: str):
@@ -730,6 +748,9 @@ class SessionsPane(Vertical):
         safe_sid = shlex.quote(sid)
         cmd = f"hermes chat -r {safe_sid} -q {safe_msg} -Q 2>&1"
 
+        self._streaming_session_id = sid
+        self._running_sessions.add(sid)
+        self._maybe_start_auto_refresh()
         self._start_streaming_ai_message()
         full_output = ""
         async for chunk in _shell_async_stream(cmd):
@@ -743,6 +764,9 @@ class SessionsPane(Vertical):
             self._stop_loading_bar()
             status.update("[red]❌ 请求失败[/red]")
             self.set_timer(3, lambda: status.update(""))
+            self._running_sessions.discard(sid)
+            if self._streaming_session_id == sid:
+                self._streaming_session_id = None
             inp.read_only = False
             return
 
@@ -755,6 +779,10 @@ class SessionsPane(Vertical):
         self._stop_loading_bar()
         status.update("[bold green]✅ 回复完成[/bold green]")
         self.set_timer(3, lambda: status.update(""))
+        self._running_sessions.discard(sid)
+        if self._streaming_session_id == sid:
+            self._streaming_session_id = None
+        self._maybe_start_auto_refresh()
         inp.read_only = False
 
     def _parse_chat_output(self, raw: str) -> tuple[str | None, str]:
