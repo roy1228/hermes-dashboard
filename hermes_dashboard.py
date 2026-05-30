@@ -640,7 +640,10 @@ class SessionsPane(Vertical):
         log.load_text("正在加载历史消息...\n")
         log.scroll_end()
         status = self.query_one("#sess-chat-status", Static)
-        status.update("[dim]⏳ 加载中...[/dim]")
+        if sid in self._running_sessions:
+            status.update("[bold yellow]⏳ 任务运行中...[/bold yellow]")
+        else:
+            status.update("[dim]⏳ 加载中...[/dim]")
         inp = self.query_one("#sess-chat-input", TextArea)
         inp.read_only = False
         asyncio.create_task(self._fetch_session_messages(sid))
